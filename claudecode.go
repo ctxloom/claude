@@ -25,36 +25,33 @@ type ClaudeConfig struct {
 // BackendType identifies the backend this config drives.
 func (ClaudeConfig) BackendType() string { return "claude-code" }
 
-// ClaudeCode implements the Backend interface for Claude Code CLI.
+// ClaudeCode implements the Backend interface for Claude Code CLI. The shared
+// launch core (capability wiring, accessors, Setup/Cleanup) lives in the embedded
+// agent.LaunchBackend; ClaudeCode adds only the Claude-specific Configure/Execute.
 type ClaudeCode struct {
-	BaseBackend
+	agent.LaunchBackend
 	writeSettings agent.WriteSettingsFunc
-	lifecycle     *ClaudeLifecycle
-	skills        *ClaudeSkills
-	context       *ClaudeContext
-	mcp           *ClaudeMCPManager
-	history       *ClaudeSessionHistory
 }
 
 // NewClaudeCode creates a new Claude Code backend with default settings. The
 // writeSettings dispatch is injected (the registry supplies it) so the launch
 // bases can write settings without importing the registry.
 func NewClaudeCode(writeSettings agent.WriteSettingsFunc) *ClaudeCode {
-	b := &ClaudeCode{
-		BaseBackend:   NewBaseBackend("claude-code", "1.0.0"),
-		writeSettings: writeSettings,
-	}
+	b := &ClaudeCode{writeSettings: writeSettings}
+	b.BaseBackend = agent.NewBaseBackend("claude-code", "1.0.0")
 	b.BinaryPath = "claude"
-	b.lifecycle = NewClaudeLifecycle(b)
-	b.skills = &ClaudeSkills{backend: b}
-	b.context = NewClaudeContext(b)
-	b.mcp = NewClaudeMCPManager(b)
-	b.history = NewClaudeSessionHistory(b)
+	b.InitLaunch(
+		NewClaudeLifecycle(b),
+		&ClaudeSkills{backend: b},
+		NewClaudeContext(b),
+		NewClaudeMCPManager(b),
+		NewClaudeSessionHistory(b),
+	)
 	return b
 }
 
 // Configure applies a decoded claude-code config to this backend.
-func (b *ClaudeCode) Configure(cfg BackendConfig) {
+func (b *ClaudeCode) Configure(cfg agent.BackendConfig) {
 	c, ok := cfg.(*ClaudeConfig)
 	if !ok {
 		return
@@ -70,66 +67,8 @@ func (b *ClaudeCode) Configure(cfg BackendConfig) {
 	}
 }
 
-// Lifecycle returns the lifecycle handler (hooks).
-func (b *ClaudeCode) Lifecycle() LifecycleHandler {
-	return b.lifecycle
-}
-
-// Skills returns the skill registry (slash commands).
-func (b *ClaudeCode) Skills() SkillRegistry {
-	return b.skills
-}
-
-// Context returns the context provider (file + hook).
-func (b *ClaudeCode) Context() ContextProvider {
-	return b.context
-}
-
-// MCP returns the MCP server manager.
-func (b *ClaudeCode) MCP() MCPManager {
-	return b.mcp
-}
-
-// History returns the session history accessor.
-func (b *ClaudeCode) History() SessionHistory {
-	return b.history
-}
-
-// Setup prepares the backend for execution. The host resolves ctxloom
-// config/bundles and ships the result in req.Managed, so this Setup consumes
-// only the wire-typed payload — it never imports config/bundles. It still owns
-// the one piece only the plugin knows: the context hash, from which it appends
-// the SessionStart context-injection hook (via MergeManaged).
-func (b *ClaudeCode) Setup(ctx context.Context, req *SetupRequest) error {
-	b.SetWorkDir(req.WorkDir)
-
-	// Provide context via the context provider
-	if err := b.context.Provide(b.WorkDir(), req.Fragments); err != nil {
-		return fmt.Errorf("failed to provide context: %w", err)
-	}
-
-	if req.Managed != nil {
-		// Write slash commands from the host-resolved exports.
-		if len(req.Managed.Prompts) > 0 {
-			if err := b.skills.RegisterFromContent(b.WorkDir(), req.Managed.Prompts); err != nil {
-				return fmt.Errorf("failed to register skills: %w", err)
-			}
-		}
-		// Fold the host-assembled hooks + MCP into the lifecycle and append the
-		// agent's own context-injection hook from the plugin-side context hash.
-		b.lifecycle.MergeManaged(req.Managed, b.WorkDir(), b.context.GetContextHash())
-	}
-
-	// Flush hooks to settings file
-	if err := b.lifecycle.Flush(b.WorkDir()); err != nil {
-		return fmt.Errorf("failed to write hooks: %w", err)
-	}
-
-	return nil
-}
-
 // Execute runs the backend with the given request.
-func (b *ClaudeCode) Execute(ctx context.Context, req *ExecuteRequest, stdout, stderr io.Writer) (*ExecuteResult, error) {
+func (b *ClaudeCode) Execute(ctx context.Context, req *agent.ExecuteRequest, stdout, stderr io.Writer) (*agent.ExecuteResult, error) {
 	// Best-effort model identity. In minimal mode this is overwritten below with
 	// the real id the CLI reports; otherwise it is the requested model, falling
 	// back to the backend name rather than a fabricated version.
@@ -137,14 +76,14 @@ func (b *ClaudeCode) Execute(ctx context.Context, req *ExecuteRequest, stdout, s
 	if modelName == "" {
 		modelName = b.Name()
 	}
-	modelInfo := &ModelInfo{
+	modelInfo := &agent.ModelInfo{
 		ModelName: modelName,
 		Provider:  "anthropic",
 	}
 
 	// Dry run
 	if req.DryRun {
-		return &ExecuteResult{ExitCode: 0, ModelInfo: modelInfo}, nil
+		return &agent.ExecuteResult{ExitCode: 0, ModelInfo: modelInfo}, nil
 	}
 
 	// Build args
@@ -160,13 +99,13 @@ func (b *ClaudeCode) Execute(ctx context.Context, req *ExecuteRequest, stdout, s
 	for k, v := range req.Env {
 		env[k] = v
 	}
-	if b.context.GetContextFilePath() != "" {
-		env[SCMContextFileEnv] = b.context.GetContextFilePath()
+	if b.ContextFilePath() != "" {
+		env[agent.SCMContextFileEnv] = b.ContextFilePath()
 	}
 
 	// Minimal oneshot runs with --output-format json: buffer the envelope,
 	// emit the assistant text, and record the model the CLI actually used.
-	if req.Mode == ModeOneshot && req.SkipSetup {
+	if req.Mode == agent.ModeOneshot && req.SkipSetup {
 		var raw bytes.Buffer
 		exitCode, err := b.RunNonInteractive(ctx, args, env, &raw, stderr)
 		text, model, perr := parseClaudeJSONResult(raw.Bytes())
@@ -174,25 +113,25 @@ func (b *ClaudeCode) Execute(ctx context.Context, req *ExecuteRequest, stdout, s
 			// Fault tolerant: hand back whatever the CLI emitted and keep the
 			// best-effort model rather than dropping the result.
 			_, _ = stdout.Write(raw.Bytes())
-			return &ExecuteResult{ExitCode: exitCode, ModelInfo: modelInfo}, err
+			return &agent.ExecuteResult{ExitCode: exitCode, ModelInfo: modelInfo}, err
 		}
 		_, _ = io.WriteString(stdout, text)
 		if model != "" {
 			modelInfo.ModelName = model
 		}
-		return &ExecuteResult{ExitCode: exitCode, ModelInfo: modelInfo}, err
+		return &agent.ExecuteResult{ExitCode: exitCode, ModelInfo: modelInfo}, err
 	}
 
 	// Run based on mode
 	var exitCode int32
 	var err error
-	if req.Mode == ModeInteractive {
+	if req.Mode == agent.ModeInteractive {
 		exitCode, err = b.RunInteractive(ctx, args, env, req.Stdin, stdout, stderr, req.Resize)
 	} else {
 		exitCode, err = b.RunNonInteractive(ctx, args, env, stdout, stderr)
 	}
 
-	return &ExecuteResult{ExitCode: exitCode, ModelInfo: modelInfo}, err
+	return &agent.ExecuteResult{ExitCode: exitCode, ModelInfo: modelInfo}, err
 }
 
 // claudeJSONResult is the subset of the `claude --output-format json` envelope
@@ -236,13 +175,8 @@ func parseClaudeJSONResult(data []byte) (text, model string, err error) {
 	return env.Result, best, nil
 }
 
-// Cleanup releases resources after execution.
-func (b *ClaudeCode) Cleanup(ctx context.Context) error {
-	return nil
-}
-
 // buildArgs constructs the command-line arguments.
-func (b *ClaudeCode) buildArgs(req *ExecuteRequest) []string {
+func (b *ClaudeCode) buildArgs(req *agent.ExecuteRequest) []string {
 	args := make([]string, len(b.Args))
 	copy(args, b.Args)
 
@@ -257,7 +191,7 @@ func (b *ClaudeCode) buildArgs(req *ExecuteRequest) []string {
 		args = append(args, "--model", req.Model)
 	}
 
-	if req.Mode == ModeOneshot {
+	if req.Mode == agent.ModeOneshot {
 		args = append(args, "--print")
 	}
 
@@ -282,7 +216,7 @@ func (b *ClaudeCode) buildArgs(req *ExecuteRequest) []string {
 		)
 	}
 
-	if prompt := GetPromptContent(req.Prompt); prompt != "" {
+	if prompt := agent.GetPromptContent(req.Prompt); prompt != "" {
 		args = append(args, prompt)
 	}
 

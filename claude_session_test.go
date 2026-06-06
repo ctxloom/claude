@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ctxloom/shared/agent"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -143,16 +144,16 @@ func TestClaudeSessionHistory_GetSession(t *testing.T) {
 	assert.Len(t, session.Entries, 4)
 
 	// Verify entry types
-	assert.Equal(t, EntryTypeUser, session.Entries[0].Type)
+	assert.Equal(t, agent.EntryTypeUser, session.Entries[0].Type)
 	assert.Equal(t, "Hello", session.Entries[0].Content)
 
-	assert.Equal(t, EntryTypeAssistant, session.Entries[1].Type)
+	assert.Equal(t, agent.EntryTypeAssistant, session.Entries[1].Type)
 	assert.Equal(t, "Hi there!", session.Entries[1].Content)
 
-	assert.Equal(t, EntryTypeToolUse, session.Entries[2].Type)
+	assert.Equal(t, agent.EntryTypeToolUse, session.Entries[2].Type)
 	assert.Equal(t, "Read", session.Entries[2].ToolName)
 
-	assert.Equal(t, EntryTypeToolResult, session.Entries[3].Type)
+	assert.Equal(t, agent.EntryTypeToolResult, session.Entries[3].Type)
 	assert.Equal(t, "file contents", session.Entries[3].ToolOutput)
 
 	// Verify timestamps
@@ -240,17 +241,17 @@ func TestClaudeSessionHistory_ModernBlockSchema(t *testing.T) {
 
 	require.Len(t, session.Entries, 4)
 
-	assert.Equal(t, EntryTypeUser, session.Entries[0].Type)
+	assert.Equal(t, agent.EntryTypeUser, session.Entries[0].Type)
 	assert.Equal(t, "Merge PR 8", session.Entries[0].Content)
 
-	assert.Equal(t, EntryTypeAssistant, session.Entries[1].Type)
+	assert.Equal(t, agent.EntryTypeAssistant, session.Entries[1].Type)
 	assert.Equal(t, "I'll check PR 8 first.", session.Entries[1].Content)
 
-	assert.Equal(t, EntryTypeToolUse, session.Entries[2].Type)
+	assert.Equal(t, agent.EntryTypeToolUse, session.Entries[2].Type)
 	assert.Equal(t, "Bash", session.Entries[2].ToolName)
 	assert.Contains(t, string(session.Entries[2].ToolInput), "gh pr view 8")
 
-	assert.Equal(t, EntryTypeToolResult, session.Entries[3].Type)
+	assert.Equal(t, agent.EntryTypeToolResult, session.Entries[3].Type)
 	assert.Equal(t, "PR 8 is open", session.Entries[3].ToolOutput)
 	assert.False(t, session.Entries[3].IsError)
 }
@@ -313,36 +314,36 @@ func TestClaudeSessionHistory_ParseEntry_UserMessage(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected SessionEntryType
+		expected agent.SessionEntryType
 		content  string
 	}{
 		{
 			name:     "user type",
 			input:    `{"type":"user","timestamp":"2024-01-15T10:00:00Z","message":{"content":"Hello"}}`,
-			expected: EntryTypeUser,
+			expected: agent.EntryTypeUser,
 			content:  "Hello",
 		},
 		{
 			name:     "human type",
 			input:    `{"type":"human","timestamp":"2024-01-15T10:00:00Z","message":{"content":"Hello human"}}`,
-			expected: EntryTypeUser,
+			expected: agent.EntryTypeUser,
 			content:  "Hello human",
 		},
 		{
 			name:     "assistant type",
 			input:    `{"type":"assistant","timestamp":"2024-01-15T10:00:00Z","message":{"content":"Response"}}`,
-			expected: EntryTypeAssistant,
+			expected: agent.EntryTypeAssistant,
 			content:  "Response",
 		},
 		{
 			name:     "tool_use type",
 			input:    `{"type":"tool_use","timestamp":"2024-01-15T10:00:00Z","name":"Bash","input":{"command":"ls"}}`,
-			expected: EntryTypeToolUse,
+			expected: agent.EntryTypeToolUse,
 		},
 		{
 			name:     "tool_result type",
 			input:    `{"type":"tool_result","timestamp":"2024-01-15T10:00:00Z","name":"Bash","output":"file.txt"}`,
-			expected: EntryTypeToolResult,
+			expected: agent.EntryTypeToolResult,
 		},
 	}
 

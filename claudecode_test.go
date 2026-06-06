@@ -3,6 +3,7 @@ package claude
 import (
 	"testing"
 
+	"github.com/ctxloom/shared/agent"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -42,8 +43,8 @@ func TestNewClaudeCode_SupportedModes(t *testing.T) {
 	modes := backend.SupportedModes()
 
 	assert.Len(t, modes, 2)
-	assert.Contains(t, modes, ModeInteractive)
-	assert.Contains(t, modes, ModeOneshot)
+	assert.Contains(t, modes, agent.ModeInteractive)
+	assert.Contains(t, modes, agent.ModeOneshot)
 }
 
 // =============================================================================
@@ -134,7 +135,7 @@ func TestClaudeCode_Configure_EmptyFields(t *testing.T) {
 func TestClaudeCode_BuildArgs_AutoApprove(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	req := &ExecuteRequest{
+	req := &agent.ExecuteRequest{
 		AutoApprove: true,
 	}
 	args := backend.buildArgs(req)
@@ -147,7 +148,7 @@ func TestClaudeCode_BuildArgs_AutoApprove(t *testing.T) {
 func TestClaudeCode_BuildArgs_Model(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	req := &ExecuteRequest{
+	req := &agent.ExecuteRequest{
 		Model: "claude-3-sonnet",
 	}
 	args := backend.buildArgs(req)
@@ -167,8 +168,8 @@ func TestClaudeCode_BuildArgs_Model(t *testing.T) {
 func TestClaudeCode_BuildArgs_OneshotMode(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	req := &ExecuteRequest{
-		Mode: ModeOneshot,
+	req := &agent.ExecuteRequest{
+		Mode: agent.ModeOneshot,
 	}
 	args := backend.buildArgs(req)
 
@@ -181,8 +182,8 @@ func TestClaudeCode_BuildArgs_OneshotMode(t *testing.T) {
 func TestClaudeCode_BuildArgs_MinimalOneshotRequestsJSON(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	req := &ExecuteRequest{
-		Mode:      ModeOneshot,
+	req := &agent.ExecuteRequest{
+		Mode:      agent.ModeOneshot,
 		SkipSetup: true,
 	}
 	args := backend.buildArgs(req)
@@ -198,7 +199,7 @@ func TestClaudeCode_BuildArgs_MinimalOneshotRequestsJSON(t *testing.T) {
 func TestClaudeCode_BuildArgs_MinimalModeNoModelByDefault(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	args := backend.buildArgs(&ExecuteRequest{Mode: ModeOneshot, SkipSetup: true})
+	args := backend.buildArgs(&agent.ExecuteRequest{Mode: agent.ModeOneshot, SkipSetup: true})
 
 	assert.NotContains(t, args, "--model",
 		"minimal mode must not default a model; the caller supplies it")
@@ -209,7 +210,7 @@ func TestClaudeCode_BuildArgs_MinimalModeNoModelByDefault(t *testing.T) {
 func TestClaudeCode_BuildArgs_ExplicitModelWinsInMinimalMode(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	args := backend.buildArgs(&ExecuteRequest{Mode: ModeOneshot, SkipSetup: true, Model: "sonnet"})
+	args := backend.buildArgs(&agent.ExecuteRequest{Mode: agent.ModeOneshot, SkipSetup: true, Model: "sonnet"})
 
 	assert.True(t, argPair(args, "--model", "sonnet"))
 }
@@ -222,7 +223,7 @@ func TestClaudeCode_BuildArgs_ExplicitModelWinsInMinimalMode(t *testing.T) {
 func TestClaudeCode_BuildArgs_MinimalModeIsolatesViaSettings(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	args := backend.buildArgs(&ExecuteRequest{Mode: ModeOneshot, SkipSetup: true, Model: "claude-opus-4-8"})
+	args := backend.buildArgs(&agent.ExecuteRequest{Mode: agent.ModeOneshot, SkipSetup: true, Model: "claude-opus-4-8"})
 
 	assert.NotContains(t, args, "--setting-sources",
 		"empty --setting-sources drops model routing; isolate via --settings instead")
@@ -254,8 +255,8 @@ func TestMinimalSettings(t *testing.T) {
 func TestClaudeCode_BuildArgs_OneshotWithoutSkipSetupNoJSON(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	req := &ExecuteRequest{
-		Mode: ModeOneshot,
+	req := &agent.ExecuteRequest{
+		Mode: agent.ModeOneshot,
 	}
 	args := backend.buildArgs(req)
 
@@ -268,8 +269,8 @@ func TestClaudeCode_BuildArgs_OneshotWithoutSkipSetupNoJSON(t *testing.T) {
 func TestClaudeCode_BuildArgs_InteractiveMode(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	req := &ExecuteRequest{
-		Mode: ModeInteractive,
+	req := &agent.ExecuteRequest{
+		Mode: agent.ModeInteractive,
 	}
 	args := backend.buildArgs(req)
 
@@ -281,8 +282,8 @@ func TestClaudeCode_BuildArgs_InteractiveMode(t *testing.T) {
 func TestClaudeCode_BuildArgs_Prompt(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	req := &ExecuteRequest{
-		Prompt: &Fragment{Content: "Review this code"},
+	req := &agent.ExecuteRequest{
+		Prompt: &agent.Fragment{Content: "Review this code"},
 	}
 	args := backend.buildArgs(req)
 
@@ -294,7 +295,7 @@ func TestClaudeCode_BuildArgs_Prompt(t *testing.T) {
 func TestClaudeCode_BuildArgs_NoPrompt(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 
-	req := &ExecuteRequest{
+	req := &agent.ExecuteRequest{
 		Prompt: nil,
 	}
 	args := backend.buildArgs(req)
@@ -311,11 +312,11 @@ func TestClaudeCode_BuildArgs_Combined(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 	backend.Args = []string{"--existing-arg"}
 
-	req := &ExecuteRequest{
+	req := &agent.ExecuteRequest{
 		AutoApprove: true,
 		Model:       "opus",
-		Mode:        ModeOneshot,
-		Prompt:      &Fragment{Content: "Test prompt"},
+		Mode:        agent.ModeOneshot,
+		Prompt:      &agent.Fragment{Content: "Test prompt"},
 	}
 	args := backend.buildArgs(req)
 

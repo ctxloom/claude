@@ -18,14 +18,14 @@ import (
 // ClaudeLifecycle implements LifecycleHandler for Claude Code using hooks.
 // Embeds BaseLifecycle for shared implementation.
 type ClaudeLifecycle struct {
-	*BaseLifecycle
+	*agent.BaseLifecycle
 	backend *ClaudeCode
 }
 
 // NewClaudeLifecycle creates a new Claude lifecycle handler.
 func NewClaudeLifecycle(backend *ClaudeCode) *ClaudeLifecycle {
 	return &ClaudeLifecycle{
-		BaseLifecycle: NewBaseLifecycle("claude-code", backend.writeSettings),
+		BaseLifecycle: agent.NewBaseLifecycle("claude-code", backend.writeSettings),
 		backend:       backend,
 	}
 }
@@ -33,14 +33,14 @@ func NewClaudeLifecycle(backend *ClaudeCode) *ClaudeLifecycle {
 // ClaudeMCPManager implements MCPManager for Claude Code.
 // Embeds BaseMCPManager for shared implementation.
 type ClaudeMCPManager struct {
-	*BaseMCPManager
+	*agent.BaseMCPManager
 	backend *ClaudeCode
 }
 
 // NewClaudeMCPManager creates a new Claude MCP manager.
 func NewClaudeMCPManager(backend *ClaudeCode) *ClaudeMCPManager {
 	return &ClaudeMCPManager{
-		BaseMCPManager: NewBaseMCPManager("claude-code", backend.writeSettings),
+		BaseMCPManager: agent.NewBaseMCPManager("claude-code", backend.writeSettings),
 		backend:        backend,
 	}
 }
@@ -51,12 +51,12 @@ type ClaudeSkills struct {
 }
 
 // Register adds a skill as a Claude Code slash command.
-func (s *ClaudeSkills) Register(workDir string, skill Skill) error {
+func (s *ClaudeSkills) Register(workDir string, skill agent.Skill) error {
 	return WriteCommandFiles(workDir, []agent.CommandExport{skillExport(skill)})
 }
 
 // RegisterAll adds multiple skills as Claude Code slash commands.
-func (s *ClaudeSkills) RegisterAll(workDir string, skills []Skill) error {
+func (s *ClaudeSkills) RegisterAll(workDir string, skills []agent.Skill) error {
 	cmds := make([]agent.CommandExport, 0, len(skills))
 	for _, skill := range skills {
 		cmds = append(cmds, skillExport(skill))
@@ -72,7 +72,7 @@ func (s *ClaudeSkills) RegisterFromContent(workDir string, cmds []agent.CommandE
 }
 
 // skillExport maps a Skill to an enabled command export.
-func skillExport(skill Skill) agent.CommandExport {
+func skillExport(skill agent.Skill) agent.CommandExport {
 	return agent.CommandExport{
 		Name:        skill.Name,
 		Content:     skill.Content,
@@ -132,14 +132,14 @@ func (s *ClaudeSkills) List(workDir string) ([]string, error) {
 // ClaudeContext implements ContextProvider for Claude Code using file + hook.
 // Embeds BaseContextProvider for shared implementation.
 type ClaudeContext struct {
-	*BaseContextProvider
+	*agent.BaseContextProvider
 	backend *ClaudeCode
 }
 
 // NewClaudeContext creates a new Claude context provider.
 func NewClaudeContext(backend *ClaudeCode) *ClaudeContext {
 	return &ClaudeContext{
-		BaseContextProvider: NewBaseContextProvider(),
+		BaseContextProvider: agent.NewBaseContextProvider(),
 		backend:             backend,
 	}
 }
@@ -182,7 +182,7 @@ func NewClaudeSessionHistory(backend *ClaudeCode, opts ...ClaudeSessionHistoryOp
 }
 
 // GetCurrentSession returns the current/most recent session transcript.
-func (h *ClaudeSessionHistory) GetCurrentSession(workDir string) (*Session, error) {
+func (h *ClaudeSessionHistory) GetCurrentSession(workDir string) (*agent.Session, error) {
 	sessions, err := h.ListSessions(workDir)
 	if err != nil {
 		return nil, err
@@ -197,7 +197,7 @@ func (h *ClaudeSessionHistory) GetCurrentSession(workDir string) (*Session, erro
 }
 
 // ListSessions returns available session metadata.
-func (h *ClaudeSessionHistory) ListSessions(workDir string) ([]SessionMeta, error) {
+func (h *ClaudeSessionHistory) ListSessions(workDir string) ([]agent.SessionMeta, error) {
 	projectDir, err := h.findProjectDir(workDir)
 	if err != nil {
 		return nil, err
@@ -209,13 +209,13 @@ func (h *ClaudeSessionHistory) ListSessions(workDir string) ([]SessionMeta, erro
 		return nil, fmt.Errorf("failed to read project directory: %w", err)
 	}
 
-	var sessions []SessionMeta
+	var sessions []agent.SessionMeta
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 			continue
 		}
 
-		sessions = append(sessions, SessionMeta{
+		sessions = append(sessions, agent.SessionMeta{
 			ID:        strings.TrimSuffix(entry.Name(), ".jsonl"),
 			StartTime: entry.ModTime(), // Approximate - would need to read file for exact
 			Path:      filepath.Join(projectDir, entry.Name()),
@@ -231,7 +231,7 @@ func (h *ClaudeSessionHistory) ListSessions(workDir string) ([]SessionMeta, erro
 }
 
 // GetSession returns a specific session by ID.
-func (h *ClaudeSessionHistory) GetSession(workDir string, sessionID string) (*Session, error) {
+func (h *ClaudeSessionHistory) GetSession(workDir string, sessionID string) (*agent.Session, error) {
 	projectDir, err := h.findProjectDir(workDir)
 	if err != nil {
 		return nil, err
@@ -242,7 +242,7 @@ func (h *ClaudeSessionHistory) GetSession(workDir string, sessionID string) (*Se
 }
 
 // GetSessionByPath returns a session by its transcript file path.
-func (h *ClaudeSessionHistory) GetSessionByPath(path string) (*Session, error) {
+func (h *ClaudeSessionHistory) GetSessionByPath(path string) (*agent.Session, error) {
 	return h.parseSessionFile(path)
 }
 
@@ -292,16 +292,16 @@ func (h *ClaudeSessionHistory) findSessionFile(workDir string) (string, error) {
 }
 
 // parseSessionFile reads and parses a Claude session JSONL file.
-func (h *ClaudeSessionHistory) parseSessionFile(path string) (*Session, error) {
+func (h *ClaudeSessionHistory) parseSessionFile(path string) (*agent.Session, error) {
 	file, err := h.fs.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open session file: %w", err)
 	}
 	defer func() { _ = file.Close() }()
 
-	session := &Session{
+	session := &agent.Session{
 		ID:      strings.TrimSuffix(filepath.Base(path), ".jsonl"),
-		Entries: []SessionEntry{},
+		Entries: []agent.SessionEntry{},
 	}
 
 	scanner := bufio.NewScanner(file)
@@ -371,7 +371,7 @@ type claudeBlock struct {
 // so one assistant line can yield a text entry plus a tool-call entry per
 // tool_use block, and a user line can yield tool-result entries. Sidechain
 // (sub-agent) lines are skipped so a session reflects only its main thread.
-func (h *ClaudeSessionHistory) parseEntries(line []byte) ([]SessionEntry, error) {
+func (h *ClaudeSessionHistory) parseEntries(line []byte) ([]agent.SessionEntry, error) {
 	var raw claudeEntry
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return nil, err
@@ -382,17 +382,17 @@ func (h *ClaudeSessionHistory) parseEntries(line []byte) ([]SessionEntry, error)
 	ts := parseClaudeTimestamp(raw.Timestamp)
 	switch raw.Type {
 	case "user", "human":
-		return claudeMessageEntries(raw.Message, ts, EntryTypeUser), nil
+		return claudeMessageEntries(raw.Message, ts, agent.EntryTypeUser), nil
 	case "assistant":
-		return claudeMessageEntries(raw.Message, ts, EntryTypeAssistant), nil
+		return claudeMessageEntries(raw.Message, ts, agent.EntryTypeAssistant), nil
 	case "system":
 		if c := claudeFirstText(raw.Message); c != "" {
-			return []SessionEntry{{Timestamp: ts, Type: EntryTypeSystem, Content: c}}, nil
+			return []agent.SessionEntry{{Timestamp: ts, Type: agent.EntryTypeSystem, Content: c}}, nil
 		}
 	case "tool_use": // legacy flat schema
-		return []SessionEntry{{Timestamp: ts, Type: EntryTypeToolUse, ToolName: raw.Name, ToolInput: raw.Input}}, nil
+		return []agent.SessionEntry{{Timestamp: ts, Type: agent.EntryTypeToolUse, ToolName: raw.Name, ToolInput: raw.Input}}, nil
 	case "tool_result": // legacy flat schema
-		return []SessionEntry{{Timestamp: ts, Type: EntryTypeToolResult, ToolName: raw.Name, ToolOutput: raw.Output, IsError: raw.IsError}}, nil
+		return []agent.SessionEntry{{Timestamp: ts, Type: agent.EntryTypeToolResult, ToolName: raw.Name, ToolOutput: raw.Output, IsError: raw.IsError}}, nil
 	}
 	return nil, nil
 }
@@ -433,12 +433,12 @@ func claudeBlocks(message json.RawMessage) []claudeBlock {
 // into normalized entries, preserving order: prose text becomes a proseType
 // entry, tool_use becomes a ToolUse entry, tool_result becomes a ToolResult
 // entry. thinking and other block types are intentionally dropped.
-func claudeMessageEntries(message json.RawMessage, ts time.Time, proseType SessionEntryType) []SessionEntry {
-	var out []SessionEntry
+func claudeMessageEntries(message json.RawMessage, ts time.Time, proseType agent.SessionEntryType) []agent.SessionEntry {
+	var out []agent.SessionEntry
 	var text strings.Builder
 	flushText := func() {
 		if text.Len() > 0 {
-			out = append(out, SessionEntry{Timestamp: ts, Type: proseType, Content: text.String()})
+			out = append(out, agent.SessionEntry{Timestamp: ts, Type: proseType, Content: text.String()})
 			text.Reset()
 		}
 	}
@@ -453,10 +453,10 @@ func claudeMessageEntries(message json.RawMessage, ts time.Time, proseType Sessi
 			}
 		case "tool_use":
 			flushText()
-			out = append(out, SessionEntry{Timestamp: ts, Type: EntryTypeToolUse, ToolName: b.Name, ToolInput: b.Input})
+			out = append(out, agent.SessionEntry{Timestamp: ts, Type: agent.EntryTypeToolUse, ToolName: b.Name, ToolInput: b.Input})
 		case "tool_result":
 			flushText()
-			out = append(out, SessionEntry{Timestamp: ts, Type: EntryTypeToolResult, ToolOutput: claudeBlockText(b.Content), IsError: b.IsError})
+			out = append(out, agent.SessionEntry{Timestamp: ts, Type: agent.EntryTypeToolResult, ToolOutput: claudeBlockText(b.Content), IsError: b.IsError})
 		}
 	}
 	flushText()

@@ -30,7 +30,7 @@ func TestClaudeLifecycle_OnSessionStart(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 	lifecycle := NewClaudeLifecycle(backend)
 
-	handler := EventHandler{
+	handler := agent.EventHandler{
 		Command: "echo test",
 		Timeout: 30,
 	}
@@ -49,7 +49,7 @@ func TestClaudeLifecycle_OnSessionEnd(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 	lifecycle := NewClaudeLifecycle(backend)
 
-	handler := EventHandler{
+	handler := agent.EventHandler{
 		Command: "echo cleanup",
 		Timeout: 30,
 	}
@@ -67,13 +67,13 @@ func TestClaudeLifecycle_OnToolUse(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 	lifecycle := NewClaudeLifecycle(backend)
 
-	handler := EventHandler{
+	handler := agent.EventHandler{
 		Command: "echo tool",
 		Timeout: 30,
 	}
 
 	t.Run("before tool use", func(t *testing.T) {
-		err := lifecycle.OnToolUse("/tmp", BeforeToolUse, handler)
+		err := lifecycle.OnToolUse("/tmp", agent.BeforeToolUse, handler)
 		require.NoError(t, err)
 		hooks := lifecycle.GetHooks()
 		assert.Len(t, hooks.Unified.PreTool, 1)
@@ -82,7 +82,7 @@ func TestClaudeLifecycle_OnToolUse(t *testing.T) {
 	t.Run("after tool use", func(t *testing.T) {
 		// Create fresh lifecycle for independent test
 		lifecycle2 := NewClaudeLifecycle(backend)
-		err := lifecycle2.OnToolUse("/tmp", AfterToolUse, handler)
+		err := lifecycle2.OnToolUse("/tmp", agent.AfterToolUse, handler)
 		require.NoError(t, err)
 		hooks := lifecycle2.GetHooks()
 		assert.Len(t, hooks.Unified.PostTool, 1)
@@ -95,7 +95,7 @@ func TestClaudeLifecycle_Clear(t *testing.T) {
 	lifecycle := NewClaudeLifecycle(backend)
 
 	// Add some hooks first
-	_ = lifecycle.OnSessionStart("/tmp", EventHandler{Command: "echo test"})
+	_ = lifecycle.OnSessionStart("/tmp", agent.EventHandler{Command: "echo test"})
 
 	// Note: Clear will try to write to settings, which may fail in test
 	// We're just verifying it resets internal state
@@ -110,7 +110,7 @@ func TestClaudeLifecycle_Flush(t *testing.T) {
 	lifecycle := NewClaudeLifecycle(backend)
 
 	// Add some hooks
-	_ = lifecycle.OnSessionStart("/tmp", EventHandler{Command: "echo test"})
+	_ = lifecycle.OnSessionStart("/tmp", agent.EventHandler{Command: "echo test"})
 
 	// Flush will attempt file I/O; we're verifying it doesn't panic
 	_ = lifecycle.Flush("/tmp")
@@ -120,7 +120,7 @@ func TestClaudeMCPManager_RegisterServer(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 	manager := NewClaudeMCPManager(backend)
 
-	server := MCPServer{
+	server := agent.MCPServer{
 		Name:    "test-server",
 		Command: "test-cmd",
 		Args:    []string{"arg1"},
@@ -139,7 +139,7 @@ func TestClaudeMCPManager_UnregisterServer(t *testing.T) {
 	manager := NewClaudeMCPManager(backend)
 
 	// Register first
-	server := MCPServer{
+	server := agent.MCPServer{
 		Name:    "test-server",
 		Command: "test-cmd",
 	}
@@ -156,8 +156,8 @@ func TestClaudeMCPManager_ListServers(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 	manager := NewClaudeMCPManager(backend)
 
-	_ = manager.RegisterServer("/tmp", MCPServer{Name: "server1"})
-	_ = manager.RegisterServer("/tmp", MCPServer{Name: "server2"})
+	_ = manager.RegisterServer("/tmp", agent.MCPServer{Name: "server1"})
+	_ = manager.RegisterServer("/tmp", agent.MCPServer{Name: "server2"})
 
 	names, err := manager.ListServers("/tmp")
 	require.NoError(t, err)
@@ -170,7 +170,7 @@ func TestClaudeMCPManager_GetServer(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 	manager := NewClaudeMCPManager(backend)
 
-	server := MCPServer{
+	server := agent.MCPServer{
 		Name:    "test-server",
 		Command: "test-cmd",
 		Args:    []string{"arg1"},
@@ -197,7 +197,7 @@ func TestClaudeMCPManager_Clear(t *testing.T) {
 	backend := NewClaudeCode(writeClaudeSettings)
 	manager := NewClaudeMCPManager(backend)
 
-	_ = manager.RegisterServer("/tmp", MCPServer{Name: "server1"})
+	_ = manager.RegisterServer("/tmp", agent.MCPServer{Name: "server1"})
 
 	// Clear will attempt file I/O; we're verifying it clears internal state
 	_ = manager.Clear("/tmp")
@@ -211,7 +211,7 @@ func TestClaudeSkills_Register(t *testing.T) {
 		backend: backend,
 	}
 
-	skill := Skill{
+	skill := agent.Skill{
 		Name:        "test-skill",
 		Description: "Test skill",
 		Content:     "# Test Skill\n\nTest content",
@@ -229,7 +229,7 @@ func TestClaudeSkills_RegisterAll(t *testing.T) {
 		backend: backend,
 	}
 
-	skillList := []Skill{
+	skillList := []agent.Skill{
 		{
 			Name:        "skill1",
 			Description: "Skill 1",
@@ -255,7 +255,7 @@ func TestClaudeSkills_RegisterAll(t *testing.T) {
 func TestClaudeSkills_Register_WritesToWorkdir(t *testing.T) {
 	workDir := t.TempDir()
 	skills := &ClaudeSkills{backend: NewClaudeCode(writeClaudeSettings)}
-	require.NoError(t, skills.Register(workDir, Skill{
+	require.NoError(t, skills.Register(workDir, agent.Skill{
 		Name:        "test-skill",
 		Description: "Test skill",
 		Content:     "# Test Skill\n\nTest content",
@@ -308,7 +308,7 @@ func TestClaudeSkills_List_NoManifest(t *testing.T) {
 func TestClaudeSkills_List_StripsExtension(t *testing.T) {
 	workDir := t.TempDir()
 	skills := &ClaudeSkills{backend: NewClaudeCode(writeClaudeSettings)}
-	require.NoError(t, skills.RegisterAll(workDir, []Skill{
+	require.NoError(t, skills.RegisterAll(workDir, []agent.Skill{
 		{Name: "a", Content: "x"},
 		{Name: "b", Content: "y"},
 	}))
@@ -342,7 +342,7 @@ func TestClaudeSkills_List_StripsExtension(t *testing.T) {
 func TestClaudeSkills_Clear(t *testing.T) {
 	workDir := t.TempDir()
 	skills := &ClaudeSkills{backend: NewClaudeCode(writeClaudeSettings)}
-	require.NoError(t, skills.Register(workDir, Skill{
+	require.NoError(t, skills.Register(workDir, agent.Skill{
 		Name: "doomed", Content: "x", Description: "to be cleared",
 	}))
 
@@ -373,7 +373,7 @@ func TestClaudeContext_GetContextHash(t *testing.T) {
 	context := NewClaudeContext(backend)
 
 	// Write context to set hash
-	fragments := []*Fragment{{Content: "test content"}}
+	fragments := []*agent.Fragment{{Content: "test content"}}
 	_ = context.Provide("/tmp", fragments)
 
 	hash := context.GetContextHash()
@@ -402,11 +402,11 @@ func TestClaudeContext_GetContextFilePath_WithHash(t *testing.T) {
 
 	// Provide context to generate a hash
 	tmpDir := t.TempDir()
-	_ = context.Provide(tmpDir, []*Fragment{{Content: "test content"}})
+	_ = context.Provide(tmpDir, []*agent.Fragment{{Content: "test content"}})
 
 	path := context.GetContextFilePath()
 	assert.NotEmpty(t, path)
-	assert.Contains(t, path, SCMContextSubdir)
+	assert.Contains(t, path, agent.SCMContextSubdir)
 	assert.Contains(t, path, ".md")
 }
 
@@ -415,7 +415,7 @@ func TestClaudeContext_Clear(t *testing.T) {
 	context := NewClaudeContext(backend)
 
 	// Provide some context first
-	_ = context.Provide("/tmp", []*Fragment{{Content: "test"}})
+	_ = context.Provide("/tmp", []*agent.Fragment{{Content: "test"}})
 
 	err := context.Clear("/tmp")
 	require.NoError(t, err)

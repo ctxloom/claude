@@ -20,23 +20,6 @@ func NewWriter(o agent.SettingsOptions) agent.SettingsWriter {
 	return &ClaudeCodeHookWriter{FS: o.FS, statusLineDisabled: o.StatusLineDisabled}
 }
 
-// Shims to the shared core helpers/symbols so the moved code below reads
-// unchanged (transitional; inline to agent.* later).
-type SettingsStatus = agent.SettingsStatus
-
-const ctxloomBinary = agent.CtxloomBinary
-
-var (
-	ctxloomMCPArgs  = agent.CtxloomMCPArgs
-	getFS           = agent.GetFS
-	atomicWriteFile = agent.AtomicWriteFile
-)
-
-func warn(format string, args ...any)              { agent.Warn(format, args...) }
-func computeHookHash(h wire.Hook) string           { return agent.ComputeHookHash(h) }
-func computeMCPServerHash(s wire.MCPServer) string { return agent.ComputeMCPServerHash(s) }
-func isCtxloomManaged(command string) bool         { return agent.IsManaged(command, "ctxloom") }
-
 // ----- moved verbatim from internal/lm/backends (hooks.go + uninstall.go) -----
 // ClaudeCodeHookWriter writes hooks to Claude Code's settings.json format.
 type ClaudeCodeHookWriter struct {
@@ -48,7 +31,7 @@ type ClaudeCodeHookWriter struct {
 
 // getFS returns the filesystem to use, defaulting to the OS filesystem.
 func (w *ClaudeCodeHookWriter) getFS() afero.Fs {
-	return getFS(w.FS)
+	return agent.GetFS(w.FS)
 }
 
 // HooksPath returns the path to Claude Code's settings.json file.
@@ -234,7 +217,7 @@ func (w *ClaudeCodeHookWriter) loadSettings(path string) (*claudeCodeSettings, e
 
 // warn outputs a warning message to stderr.
 func (w *ClaudeCodeHookWriter) warn(format string, args ...interface{}) {
-	warn(format, args...)
+	agent.Warn(format, args...)
 }
 
 // saveSettings writes settings back to settings.json.
@@ -272,7 +255,7 @@ func (w *ClaudeCodeHookWriter) saveSettings(path string, settings *claudeCodeSet
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
-	return atomicWriteFile(w.getFS(), path, data, "settings")
+	return agent.AtomicWriteFile(w.getFS(), path, data, "settings")
 }
 
 // loadMCPConfig loads existing .mcp.json or returns empty config.
@@ -313,7 +296,7 @@ func (w *ClaudeCodeHookWriter) saveMCPConfig(path string, mcpConfig *claudeCodeM
 		return fmt.Errorf("failed to marshal .mcp.json: %w", err)
 	}
 
-	return atomicWriteFile(w.getFS(), path, data, ".mcp.json")
+	return agent.AtomicWriteFile(w.getFS(), path, data, ".mcp.json")
 }
 
 // writeMCPConfig writes MCP servers to .mcp.json.
@@ -332,7 +315,7 @@ func (w *ClaudeCodeHookWriter) writeMCPConfig(projectDir string, mcp *wire.MCPCo
 	// commands like `npx …`), and isCtxloomManaged covers ctxloom's own
 	// auto-registered server even if its marker ever drifts.
 	for name, server := range mcpConfig.MCPServers {
-		if server.SCM != "" || isCtxloomManaged(server.Command) {
+		if server.SCM != "" || agent.IsManaged(server.Command, "ctxloom") {
 			delete(mcpConfig.MCPServers, name)
 		}
 	}
@@ -356,7 +339,7 @@ func (w *ClaudeCodeHookWriter) writeMCPConfig(projectDir string, mcp *wire.MCPCo
 // ctxloom-emitted command lets apply migrate it forward.
 func (w *ClaudeCodeHookWriter) ensureStatusLine(settings *claudeCodeSettings) {
 	// If statusLine is set and NOT ctxloom-managed, respect the user's config
-	if settings.StatusLine != nil && !isCtxloomManaged(settings.StatusLine.Command) {
+	if settings.StatusLine != nil && !agent.IsManaged(settings.StatusLine.Command, "ctxloom") {
 		return
 	}
 
@@ -372,7 +355,7 @@ func (w *ClaudeCodeHookWriter) ensureStatusLine(settings *claudeCodeSettings) {
 	// behind not baking an absolute path into the file.
 	settings.StatusLine = &claudeCodeStatusLine{
 		Type:    "command",
-		Command: ctxloomBinary + " hook hud",
+		Command: agent.CtxloomBinary + " hook hud",
 	}
 }
 
@@ -387,7 +370,7 @@ func (w *ClaudeCodeHookWriter) removeCtxloomHooks(settings *claudeCodeSettings) 
 			var filteredHooks []claudeCodeHook
 			for _, hook := range matcher.Hooks {
 				// Keep hooks that are NOT ctxloom-managed
-				if hook.SCM == "" && !isCtxloomManaged(hook.Command) {
+				if hook.SCM == "" && !agent.IsManaged(hook.Command, "ctxloom") {
 					filteredHooks = append(filteredHooks, hook)
 				}
 			}
@@ -462,7 +445,7 @@ func (w *ClaudeCodeHookWriter) addHook(settings *claudeCodeSettings, eventName s
 		Prompt:  h.Prompt,
 		Timeout: h.Timeout,
 		Async:   h.Async,
-		SCM:     computeHookHash(h),
+		SCM:     agent.ComputeHookHash(h),
 	}
 
 	// Default type to "command"
@@ -506,8 +489,8 @@ func (w *ClaudeCodeHookWriter) addMCPServersToConfig(mcpConfig *claudeCodeMCPCon
 	// Auto-register ctxloom's own MCP server unless disabled
 	if mcp == nil || mcp.ShouldAutoRegisterCtxloom() {
 		mcpConfig.MCPServers[AppMCPServerName] = claudeCodeMCPServer{
-			Command: ctxloomBinary,
-			Args:    ctxloomMCPArgs,
+			Command: agent.CtxloomBinary,
+			Args:    agent.CtxloomMCPArgs,
 			Cwd:     "${CLAUDE_PROJECT_DIR}", // Run in project directory so findAppDir works
 			SCM:     "ctxloom-auto",          // Marker for auto-registered ctxloom server
 		}
@@ -531,7 +514,7 @@ func (w *ClaudeCodeHookWriter) addMCPServersToConfig(mcpConfig *claudeCodeMCPCon
 		mcpConfig.MCPServers[name] = claudeCodeMCPServer{
 			Command: server.Command,
 			Args:    server.Args,
-			SCM:     computeMCPServerHash(server), // Marker for ctxloom-managed
+			SCM:     agent.ComputeMCPServerHash(server), // Marker for ctxloom-managed
 		}
 	}
 
@@ -541,7 +524,7 @@ func (w *ClaudeCodeHookWriter) addMCPServersToConfig(mcpConfig *claudeCodeMCPCon
 			mcpConfig.MCPServers[name] = claudeCodeMCPServer{
 				Command: server.Command,
 				Args:    server.Args,
-				SCM:     computeMCPServerHash(server),
+				SCM:     agent.ComputeMCPServerHash(server),
 			}
 		}
 	}
@@ -560,7 +543,7 @@ func (w *ClaudeCodeHookWriter) RemoveSettings(projectDir string) error {
 			return fmt.Errorf("failed to load existing settings: %w", err)
 		}
 		w.removeCtxloomHooks(settings)
-		if settings.StatusLine != nil && isCtxloomManaged(settings.StatusLine.Command) {
+		if settings.StatusLine != nil && agent.IsManaged(settings.StatusLine.Command, "ctxloom") {
 			settings.StatusLine = nil
 		}
 		if err := w.saveSettings(settingsPath, settings); err != nil {
@@ -587,9 +570,9 @@ func (w *ClaudeCodeHookWriter) RemoveSettings(projectDir string) error {
 }
 
 // Status implements SettingsWriter for Claude Code.
-func (w *ClaudeCodeHookWriter) Status(projectDir string) (SettingsStatus, error) {
+func (w *ClaudeCodeHookWriter) Status(projectDir string) (agent.SettingsStatus, error) {
 	fs := w.getFS()
-	var status SettingsStatus
+	var status agent.SettingsStatus
 
 	settingsPath := w.SettingsPath(projectDir)
 	if exists, _ := afero.Exists(fs, settingsPath); exists {
@@ -599,7 +582,7 @@ func (w *ClaudeCodeHookWriter) Status(projectDir string) (SettingsStatus, error)
 			return status, fmt.Errorf("failed to load existing settings: %w", err)
 		}
 		status.HooksPresent = claudeHasManagedHook(settings)
-		status.StatusLine = settings.StatusLine != nil && isCtxloomManaged(settings.StatusLine.Command)
+		status.StatusLine = settings.StatusLine != nil && agent.IsManaged(settings.StatusLine.Command, "ctxloom")
 	}
 
 	mcpPath := w.MCPConfigPath(projectDir)
@@ -623,7 +606,7 @@ func claudeHasManagedHook(settings *claudeCodeSettings) bool {
 	for _, matchers := range settings.Hooks {
 		for _, matcher := range matchers {
 			for _, hook := range matcher.Hooks {
-				if hook.SCM != "" || isCtxloomManaged(hook.Command) {
+				if hook.SCM != "" || agent.IsManaged(hook.Command, "ctxloom") {
 					return true
 				}
 			}
