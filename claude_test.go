@@ -350,6 +350,47 @@ func TestClaudeCodeHookWriter_DedupsBundleShippedHooks(t *testing.T) {
 		t.Errorf("expected exactly 1 `hook stamp-plan` hook after 3 applies, got %d", stampCount)
 	}
 }
+
+// Companion-binary hooks (executable ≠ ctxloom, no durable marker possible
+// under Claude Code's strict settings schema) dedupe by exact command on
+// re-apply; a user variant of the same binary with different args survives.
+func TestClaudeCodeHookWriter_CompanionHookIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+	// User's own ltk registration (different args) predates ctxloom's.
+	existing := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"ltk evaluate --config .ltk/config.yaml"}]}]}}`
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(existing), 0o644))
+
+	writer := &ClaudeCodeHookWriter{}
+	cfg := &wire.HooksConfig{
+		Unified: wire.UnifiedHooks{
+			PreTool: []wire.Hook{{Command: "ltk evaluate", Matcher: "Bash", SCM: "bundle:builtin:ltk"}},
+		},
+	}
+	for range 3 {
+		require.NoError(t, writer.WriteHooks(cfg, tmpDir))
+	}
+
+	data, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
+	require.NoError(t, err)
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+
+	exact, variant := 0, 0
+	for _, matcher := range settings["hooks"].(map[string]any)["PreToolUse"].([]any) {
+		for _, h := range matcher.(map[string]any)["hooks"].([]any) {
+			switch h.(map[string]any)["command"].(string) {
+			case "ltk evaluate":
+				exact++
+			case "ltk evaluate --config .ltk/config.yaml":
+				variant++
+			}
+		}
+	}
+	assert.Equal(t, 1, exact, "companion hook must not duplicate across re-applies")
+	assert.Equal(t, 1, variant, "user's own variant of the same binary must survive")
+}
 func TestClaudeCodeHookWriter_UnifiedToBackendMapping(t *testing.T) {
 	tmpDir := t.TempDir()
 	writer := &ClaudeCodeHookWriter{}

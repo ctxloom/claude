@@ -453,6 +453,14 @@ func (w *ClaudeCodeHookWriter) addHook(settings *claudeCodeSettings, eventName s
 		ccHook.Type = "command"
 	}
 
+	// Drop any surviving entry with this exact command before appending.
+	// removeCtxloomHooks only recognizes ctxloom-token commands; hooks ctxloom
+	// writes for companion binaries (e.g. `ltk evaluate`, no marker possible
+	// under Claude Code's strict settings schema) would otherwise duplicate on
+	// every re-apply. Exact match keeps user variants (`ltk evaluate --config
+	// ...`) untouched.
+	w.removeExactCommand(settings, eventName, h.Command)
+
 	// Find or create matcher entry
 	matcher := h.Matcher
 	matchers := settings.Hooks[eventName]
@@ -475,6 +483,34 @@ func (w *ClaudeCodeHookWriter) addHook(settings *claudeCodeSettings, eventName s
 	}
 
 	settings.Hooks[eventName] = matchers
+}
+
+// removeExactCommand drops every hook entry under eventName whose command is
+// exactly cmd, pruning emptied matchers. Companion-binary hooks carry no
+// durable marker (strict schema), so identity is the verbatim command string.
+func (w *ClaudeCodeHookWriter) removeExactCommand(settings *claudeCodeSettings, eventName, cmd string) {
+	matchers := settings.Hooks[eventName]
+	if len(matchers) == 0 {
+		return
+	}
+	var keptMatchers []claudeCodeHookMatcher
+	for _, m := range matchers {
+		var kept []claudeCodeHook
+		for _, hook := range m.Hooks {
+			if hook.Command != cmd {
+				kept = append(kept, hook)
+			}
+		}
+		if len(kept) > 0 {
+			m.Hooks = kept
+			keptMatchers = append(keptMatchers, m)
+		}
+	}
+	if len(keptMatchers) > 0 {
+		settings.Hooks[eventName] = keptMatchers
+	} else {
+		delete(settings.Hooks, eventName)
+	}
 }
 
 // AppMCPServerName is the name used for the ctxloom MCP server in settings.
