@@ -32,11 +32,13 @@ type HookPayload struct {
 }
 
 // ToolInput carries the union of tool-input fields ltk-style consumers need:
-// the command for Bash/PowerShell and the target for the file-editing tools
-// (Edit/Write/MultiEdit/NotebookEdit).
+// the command for Bash/PowerShell and the target for the file-editing tools —
+// file_path for Edit/Write/MultiEdit, notebook_path for NotebookEdit (which
+// does not send file_path).
 type ToolInput struct {
-	Command  string `json:"command,omitempty"`
-	FilePath string `json:"file_path,omitempty"`
+	Command      string `json:"command,omitempty"`
+	FilePath     string `json:"file_path,omitempty"`
+	NotebookPath string `json:"notebook_path,omitempty"`
 }
 
 // HookOutput is the decision JSON a hook writes to stdout to deny a tool
