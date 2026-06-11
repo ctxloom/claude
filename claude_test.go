@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClaudeCodeHookWriter_WriteHooks(t *testing.T) {
+func TestClaudeCodeHookWriter_WriteSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	writer := &ClaudeCodeHookWriter{}
 
@@ -28,7 +28,7 @@ func TestClaudeCodeHookWriter_WriteHooks(t *testing.T) {
 		},
 	}
 
-	err := writer.WriteHooks(cfg, tmpDir)
+	err := writer.WriteSettings(cfg, nil, nil, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestClaudeCodeHookWriter_PreservesUserHooks(t *testing.T) {
 		},
 	}
 
-	err := writer.WriteHooks(cfg, tmpDir)
+	err := writer.WriteSettings(cfg, nil, nil, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestClaudeCodeHookWriter_RemovesOldScmHooks(t *testing.T) {
 		},
 	}
 
-	err := writer.WriteHooks(cfg, tmpDir)
+	err := writer.WriteSettings(cfg, nil, nil, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestClaudeCodeHookWriter_RemovesHooksWithoutMarkerByCommand(t *testing.T) {
 		},
 	}
 
-	err := writer.WriteHooks(cfg, tmpDir)
+	err := writer.WriteSettings(cfg, nil, nil, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -316,8 +316,8 @@ func TestClaudeCodeHookWriter_DedupsBundleShippedHooks(t *testing.T) {
 	// Write hooks three times. Without the fix, each apply would append
 	// a duplicate of the previous run's hooks.
 	for range 3 {
-		if err := writer.WriteHooks(cfg, tmpDir); err != nil {
-			t.Fatalf("WriteHooks: %v", err)
+		if err := writer.WriteSettings(cfg, nil, nil, tmpDir); err != nil {
+			t.Fatalf("WriteSettings: %v", err)
 		}
 	}
 
@@ -369,7 +369,7 @@ func TestClaudeCodeHookWriter_CompanionHookIdempotent(t *testing.T) {
 		},
 	}
 	for range 3 {
-		require.NoError(t, writer.WriteHooks(cfg, tmpDir))
+		require.NoError(t, writer.WriteSettings(cfg, nil, nil, tmpDir))
 	}
 
 	data, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
@@ -404,7 +404,7 @@ func TestClaudeCodeHookWriter_UnifiedToBackendMapping(t *testing.T) {
 		},
 	}
 
-	err := writer.WriteHooks(cfg, tmpDir)
+	err := writer.WriteSettings(cfg, nil, nil, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestClaudeCodeHookWriter_BackendPassthrough(t *testing.T) {
 		},
 	}
 
-	err := writer.WriteHooks(cfg, tmpDir)
+	err := writer.WriteSettings(cfg, nil, nil, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestClaudeCodeHookWriter_MCPServerInjection(t *testing.T) {
 	// Empty config should still add MCP server
 	cfg := &wire.HooksConfig{}
 
-	err := writer.WriteHooks(cfg, tmpDir)
+	err := writer.WriteSettings(cfg, nil, nil, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -540,6 +540,82 @@ func TestClaudeCodeHookWriter_MCPServerInjection(t *testing.T) {
 		}
 	}
 }
+func TestClaudeCodeHookWriter_MCPServerEnvPreserved(t *testing.T) {
+	tmpDir := t.TempDir()
+	writer := &ClaudeCodeHookWriter{}
+
+	mcp := &wire.MCPConfig{
+		Servers: map[string]wire.MCPServer{
+			"config-server": {
+				Command: "config-cmd",
+				Args:    []string{"--flag"},
+				Env:     map[string]string{"CONFIG_TOKEN": "abc123"},
+			},
+		},
+		Plugins: map[string]map[string]wire.MCPServer{
+			"claude-code": {
+				"plugin-server": {
+					Command: "plugin-cmd",
+					Env:     map[string]string{"PLUGIN_KEY": "xyz"},
+				},
+			},
+		},
+	}
+	bundleMCP := map[string]wire.MCPServer{
+		"bundle-server": {
+			Command: "bundle-cmd",
+			Env:     map[string]string{"BUNDLE_VAR": "value", "OTHER": "2"},
+			SCM:     "ctxloom-bundle:test",
+		},
+	}
+
+	err := writer.WriteSettings(&wire.HooksConfig{}, mcp, bundleMCP, tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".mcp.json"))
+	if err != nil {
+		t.Fatalf("failed to read .mcp.json: %v", err)
+	}
+
+	var mcpConfig map[string]interface{}
+	if err := json.Unmarshal(data, &mcpConfig); err != nil {
+		t.Fatalf("failed to parse .mcp.json: %v", err)
+	}
+
+	mcpServers, ok := mcpConfig["mcpServers"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected mcpServers in .mcp.json")
+	}
+
+	wantEnv := map[string]map[string]string{
+		"config-server": {"CONFIG_TOKEN": "abc123"},
+		"plugin-server": {"PLUGIN_KEY": "xyz"},
+		"bundle-server": {"BUNDLE_VAR": "value", "OTHER": "2"},
+	}
+	for name, want := range wantEnv {
+		server, ok := mcpServers[name].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected %q MCP server in .mcp.json", name)
+		}
+		env, ok := server["env"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%q: env vars were dropped from .mcp.json", name)
+		}
+		for k, v := range want {
+			if env[k] != v {
+				t.Errorf("%q: env[%q] = %v, want %q", name, k, env[k], v)
+			}
+		}
+	}
+
+	// The auto-registered ctxloom server has no env and must not gain one.
+	ctxloomServer := mcpServers["ctxloom"].(map[string]interface{})
+	if _, ok := ctxloomServer["env"]; ok {
+		t.Error("ctxloom auto-registered server should not have an env key")
+	}
+}
 func TestClaudeCodeHookWriter_PreservesUserMCPServers(t *testing.T) {
 	tmpDir := t.TempDir()
 	writer := &ClaudeCodeHookWriter{}
@@ -564,7 +640,7 @@ func TestClaudeCodeHookWriter_PreservesUserMCPServers(t *testing.T) {
 
 	// Write hooks with ctxloom config
 	cfg := &wire.HooksConfig{}
-	err := writer.WriteHooks(cfg, tmpDir)
+	err := writer.WriteSettings(cfg, nil, nil, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -618,7 +694,7 @@ func TestClaudeCodeHookWriter_UpdatesSCMMCPServer(t *testing.T) {
 
 	// Write hooks - should update ctxloom server
 	cfg := &wire.HooksConfig{}
-	err := writer.WriteHooks(cfg, tmpDir)
+	err := writer.WriteSettings(cfg, nil, nil, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -660,13 +736,13 @@ func TestClaudeCodeHookWriter_ResilienceToMalformedJSON(t *testing.T) {
 	require.NoError(t, fs.MkdirAll("/project/.claude", 0755))
 	require.NoError(t, afero.WriteFile(fs, settingsPath, []byte("{ invalid json }"), 0644))
 
-	// WriteHooks should NOT fail - it should warn and continue
+	// WriteSettings should NOT fail - it should warn and continue
 	cfg := &wire.HooksConfig{
 		Unified: wire.UnifiedHooks{
 			SessionStart: []wire.Hook{{Command: "./test.sh"}},
 		},
 	}
-	err := writer.WriteHooks(cfg, "/project")
+	err := writer.WriteSettings(cfg, nil, nil, "/project")
 	require.NoError(t, err, "should not fail on malformed existing settings.json")
 
 	// Verify hooks were still written
@@ -693,7 +769,7 @@ func TestClaudeCodeHookWriter_CreatesBackupBeforeModifying(t *testing.T) {
 			SessionStart: []wire.Hook{{Command: "./test.sh"}},
 		},
 	}
-	err := writer.WriteHooks(cfg, "/project")
+	err := writer.WriteSettings(cfg, nil, nil, "/project")
 	require.NoError(t, err)
 
 	// Verify backup was created
@@ -715,9 +791,9 @@ func TestClaudeCodeHookWriter_MCPConfigResilience(t *testing.T) {
 	mcpPath := "/project/.mcp.json"
 	require.NoError(t, afero.WriteFile(fs, mcpPath, []byte("not valid json"), 0644))
 
-	// WriteHooks should NOT fail - it should warn and continue
+	// WriteSettings should NOT fail - it should warn and continue
 	cfg := &wire.HooksConfig{}
-	err := writer.WriteHooks(cfg, "/project")
+	err := writer.WriteSettings(cfg, nil, nil, "/project")
 	require.NoError(t, err, "should not fail on malformed .mcp.json")
 
 	// Verify MCP config was still written

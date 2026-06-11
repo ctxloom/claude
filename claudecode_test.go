@@ -25,17 +25,6 @@ func TestNewClaudeCode_DefaultValues(t *testing.T) {
 	assert.Empty(t, backend.Args)
 }
 
-// TestNewClaudeCode_CapabilitiesNotNil verifies that all capability handlers
-// are properly initialized. Nil capabilities would cause panics during use.
-func TestNewClaudeCode_CapabilitiesNotNil(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-
-	assert.NotNil(t, backend.Lifecycle(), "Lifecycle handler should not be nil")
-	assert.NotNil(t, backend.Skills(), "Skills registry should not be nil")
-	assert.NotNil(t, backend.Context(), "Context provider should not be nil")
-	assert.NotNil(t, backend.MCP(), "MCP manager should not be nil")
-}
-
 // TestNewClaudeCode_SupportedModes verifies that Claude Code supports both
 // interactive and oneshot execution modes.
 func TestNewClaudeCode_SupportedModes(t *testing.T) {

@@ -1,12 +1,9 @@
 package claude
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -15,54 +12,8 @@ import (
 	"github.com/ctxloom/shared/agent"
 )
 
-// ClaudeLifecycle implements LifecycleHandler for Claude Code using hooks.
-// Embeds BaseLifecycle for shared implementation.
-type ClaudeLifecycle struct {
-	*agent.BaseLifecycle
-	backend *ClaudeCode
-}
-
-// NewClaudeLifecycle creates a new Claude lifecycle handler.
-func NewClaudeLifecycle(backend *ClaudeCode) *ClaudeLifecycle {
-	return &ClaudeLifecycle{
-		BaseLifecycle: agent.NewBaseLifecycle("claude-code", backend.writeSettings),
-		backend:       backend,
-	}
-}
-
-// ClaudeMCPManager implements MCPManager for Claude Code.
-// Embeds BaseMCPManager for shared implementation.
-type ClaudeMCPManager struct {
-	*agent.BaseMCPManager
-	backend *ClaudeCode
-}
-
-// NewClaudeMCPManager creates a new Claude MCP manager.
-func NewClaudeMCPManager(backend *ClaudeCode) *ClaudeMCPManager {
-	return &ClaudeMCPManager{
-		BaseMCPManager: agent.NewBaseMCPManager("claude-code", backend.writeSettings),
-		backend:        backend,
-	}
-}
-
-// ClaudeSkills implements SkillRegistry for Claude Code using slash commands.
-type ClaudeSkills struct {
-	backend *ClaudeCode
-}
-
-// Register adds a skill as a Claude Code slash command.
-func (s *ClaudeSkills) Register(workDir string, skill agent.Skill) error {
-	return WriteCommandFiles(workDir, []agent.CommandExport{skillExport(skill)})
-}
-
-// RegisterAll adds multiple skills as Claude Code slash commands.
-func (s *ClaudeSkills) RegisterAll(workDir string, skills []agent.Skill) error {
-	cmds := make([]agent.CommandExport, 0, len(skills))
-	for _, skill := range skills {
-		cmds = append(cmds, skillExport(skill))
-	}
-	return WriteCommandFiles(workDir, cmds)
-}
+// ClaudeSkills registers slash commands for Claude Code.
+type ClaudeSkills struct{}
 
 // RegisterFromContent writes slash commands from host-resolved command exports.
 // The host maps bundle content (with claude-code enablement + metadata) to these
@@ -71,85 +22,13 @@ func (s *ClaudeSkills) RegisterFromContent(workDir string, cmds []agent.CommandE
 	return WriteCommandFiles(workDir, cmds)
 }
 
-// skillExport maps a Skill to an enabled command export.
-func skillExport(skill agent.Skill) agent.CommandExport {
-	return agent.CommandExport{
-		Name:        skill.Name,
-		Content:     skill.Content,
-		Enabled:     true,
-		Description: skill.Description,
-	}
-}
-
-// Clear removes all ctxloom-managed skills using the manifest.
-func (s *ClaudeSkills) Clear(workDir string) error {
-	commandsDir := filepath.Join(workDir, ".claude", "commands")
-	manifestPath := filepath.Join(commandsDir, ".ctxloom-manifest")
-
-	// Clean up old subdirectory style (migration)
-	_ = os.RemoveAll(filepath.Join(commandsDir, "ctxloom"))
-
-	// Read manifest and remove tracked files
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	for _, name := range strings.Split(string(data), "\n") {
-		if name = strings.TrimSpace(name); name != "" {
-			_ = os.Remove(filepath.Join(commandsDir, name))
-		}
-	}
-
-	return os.Remove(manifestPath)
-}
-
-// List returns registered skill names from the manifest.
-func (s *ClaudeSkills) List(workDir string) ([]string, error) {
-	manifestPath := filepath.Join(workDir, ".claude", "commands", ".ctxloom-manifest")
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var names []string
-	for _, line := range strings.Split(string(data), "\n") {
-		if name := strings.TrimSpace(line); name != "" {
-			// Remove .md extension
-			name = strings.TrimSuffix(name, ".md")
-			names = append(names, name)
-		}
-	}
-	return names, nil
-}
-
-// ClaudeContext implements ContextProvider for Claude Code using file + hook.
-// Embeds BaseContextProvider for shared implementation.
-type ClaudeContext struct {
-	*agent.BaseContextProvider
-	backend *ClaudeCode
-}
-
-// NewClaudeContext creates a new Claude context provider.
-func NewClaudeContext(backend *ClaudeCode) *ClaudeContext {
-	return &ClaudeContext{
-		BaseContextProvider: agent.NewBaseContextProvider(),
-		backend:             backend,
-	}
-}
-
 // ClaudeSessionHistory implements SessionHistory for Claude Code.
-// Reads from ~/.claude/projects/<hash>/session.jsonl
+// Reads from ~/.claude/projects/<hash>/session.jsonl. The embedded
+// agent.SessionStore carries the afero fs + homeDir injection points used by
+// tests and the shared transcript parse loop.
 type ClaudeSessionHistory struct {
 	backend *ClaudeCode
-	fs      afero.Fs
-	homeDir string // Override home directory for testing
+	agent.SessionStore
 }
 
 // ClaudeSessionHistoryOption configures ClaudeSessionHistory.
@@ -158,22 +37,22 @@ type ClaudeSessionHistoryOption func(*ClaudeSessionHistory)
 // WithClaudeSessionFS sets a custom filesystem for testing.
 func WithClaudeSessionFS(fs afero.Fs) ClaudeSessionHistoryOption {
 	return func(h *ClaudeSessionHistory) {
-		h.fs = fs
+		h.FS = fs
 	}
 }
 
 // WithClaudeSessionHomeDir sets a custom home directory for testing.
 func WithClaudeSessionHomeDir(dir string) ClaudeSessionHistoryOption {
 	return func(h *ClaudeSessionHistory) {
-		h.homeDir = dir
+		h.HomeDir = dir
 	}
 }
 
 // NewClaudeSessionHistory creates a new Claude session history handler.
 func NewClaudeSessionHistory(backend *ClaudeCode, opts ...ClaudeSessionHistoryOption) *ClaudeSessionHistory {
 	h := &ClaudeSessionHistory{
-		backend: backend,
-		fs:      afero.NewOsFs(),
+		backend:      backend,
+		SessionStore: agent.NewSessionStore(),
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -184,19 +63,12 @@ func NewClaudeSessionHistory(backend *ClaudeCode, opts ...ClaudeSessionHistoryOp
 // GetCurrentSession returns the current/most recent session transcript.
 func (h *ClaudeSessionHistory) GetCurrentSession(workDir string) (*agent.Session, error) {
 	sessions, err := h.ListSessions(workDir)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(sessions) == 0 {
-		return nil, fmt.Errorf("no sessions found")
-	}
-
-	// Return most recent (ListSessions is sorted by time descending)
-	return h.GetSession(workDir, sessions[0].ID)
+	return agent.MostRecentSession(sessions, err, func(m agent.SessionMeta) (*agent.Session, error) {
+		return h.GetSession(workDir, m.ID)
+	})
 }
 
-// ListSessions returns available session metadata.
+// ListSessions returns available session metadata, most recent first.
 func (h *ClaudeSessionHistory) ListSessions(workDir string) ([]agent.SessionMeta, error) {
 	projectDir, err := h.findProjectDir(workDir)
 	if err != nil {
@@ -204,7 +76,7 @@ func (h *ClaudeSessionHistory) ListSessions(workDir string) ([]agent.SessionMeta
 	}
 
 	// Look for session files in the project directory
-	entries, err := afero.ReadDir(h.fs, projectDir)
+	entries, err := afero.ReadDir(agent.GetFS(h.FS), projectDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read project directory: %w", err)
 	}
@@ -222,11 +94,7 @@ func (h *ClaudeSessionHistory) ListSessions(workDir string) ([]agent.SessionMeta
 		})
 	}
 
-	// Sort by time, most recent first
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].StartTime.After(sessions[j].StartTime)
-	})
-
+	agent.SortSessionsMostRecentFirst(sessions)
 	return sessions, nil
 }
 
@@ -250,13 +118,9 @@ func (h *ClaudeSessionHistory) GetSessionByPath(path string) (*agent.Session, er
 // Claude Code converts paths by replacing / with - and prefixing with -.
 // Example: /home/user/project -> -home-user-project
 func (h *ClaudeSessionHistory) findProjectDir(workDir string) (string, error) {
-	homeDir := h.homeDir
-	if homeDir == "" {
-		var err error
-		homeDir, err = os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("failed to get home directory: %w", err)
-		}
+	homeDir, err := h.ResolveHomeDir()
+	if err != nil {
+		return "", err
 	}
 
 	absPath, err := filepath.Abs(workDir)
@@ -268,72 +132,24 @@ func (h *ClaudeSessionHistory) findProjectDir(workDir string) (string, error) {
 	projectName := strings.ReplaceAll(absPath, string(filepath.Separator), "-")
 
 	projectDir := filepath.Join(homeDir, ".claude", "projects", projectName)
-	if _, err := h.fs.Stat(projectDir); err != nil {
+	if _, err := agent.GetFS(h.FS).Stat(projectDir); err != nil {
 		return "", fmt.Errorf("project directory not found: %s", projectDir)
 	}
 
 	return projectDir, nil
 }
 
-// findSessionFile finds the main session file for the workDir.
-func (h *ClaudeSessionHistory) findSessionFile(workDir string) (string, error) {
-	projectDir, err := h.findProjectDir(workDir)
-	if err != nil {
-		return "", err
-	}
-
-	// Claude Code uses session.jsonl as the main session file
-	sessionPath := filepath.Join(projectDir, "session.jsonl")
-	if _, err := h.fs.Stat(sessionPath); err != nil {
-		return "", fmt.Errorf("session file not found: %s", sessionPath)
-	}
-
-	return sessionPath, nil
-}
-
-// parseSessionFile reads and parses a Claude session JSONL file.
+// parseSessionFile reads and parses a Claude session JSONL file via the
+// shared SessionStore loop; malformed lines are skipped.
 func (h *ClaudeSessionHistory) parseSessionFile(path string) (*agent.Session, error) {
-	file, err := h.fs.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open session file: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-
-	session := &agent.Session{
-		ID:      strings.TrimSuffix(filepath.Base(path), ".jsonl"),
-		Entries: []agent.SessionEntry{},
-	}
-
-	scanner := bufio.NewScanner(file)
-	// Increase buffer size for potentially large tool outputs
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
+	id := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	return h.ParseSessionFile(path, id, func(line []byte) []agent.SessionEntry {
 		entries, err := h.parseEntries(line)
 		if err != nil {
-			// Skip malformed entries
-			continue
+			return nil // Skip malformed entries
 		}
-		session.Entries = append(session.Entries, entries...)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to scan session file: %w", err)
-	}
-
-	// Set start/end times from entries
-	if len(session.Entries) > 0 {
-		session.StartTime = session.Entries[0].Timestamp
-		session.EndTime = session.Entries[len(session.Entries)-1].Timestamp
-	}
-
-	return session, nil
+		return entries
+	})
 }
 
 // claudeEntry represents a raw top-level entry from Claude's session.jsonl.
@@ -508,13 +324,9 @@ func (h *ClaudeSessionHistory) TranscriptPathFromHook(workDir, sessionID, transc
 	if sessionID == "" {
 		return ""
 	}
-	homeDir := h.homeDir
-	if homeDir == "" {
-		hd, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		homeDir = hd
+	homeDir, err := h.ResolveHomeDir()
+	if err != nil {
+		return ""
 	}
 	absPath, err := filepath.Abs(workDir)
 	if err != nil {

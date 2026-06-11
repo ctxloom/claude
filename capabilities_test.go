@@ -1,4 +1,4 @@
-// Capability tests for the Claude Code launch backend (lifecycle, MCP, skills,
+// Capability tests for the Claude Code launch backend (lifecycle, skills,
 // context, history) plus the shared hook-assembly contract it drives.
 package claude
 
@@ -15,267 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestClaudeLifecycle_New verifies proper initialization
-func TestClaudeLifecycle_New(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	lifecycle := NewClaudeLifecycle(backend)
-
-	assert.NotNil(t, lifecycle)
-	assert.Equal(t, backend, lifecycle.backend)
-	assert.NotNil(t, lifecycle.BaseLifecycle)
-}
-
-// TestClaudeLifecycle_OnSessionStart verifies session start handler registration
-func TestClaudeLifecycle_OnSessionStart(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	lifecycle := NewClaudeLifecycle(backend)
-
-	handler := agent.EventHandler{
-		Command: "echo test",
-		Timeout: 30,
-	}
-
-	err := lifecycle.OnSessionStart("/tmp", handler)
-	require.NoError(t, err)
-
-	// Verify hook was added via GetHooks()
-	hooks := lifecycle.GetHooks()
-	assert.NotNil(t, hooks)
-	assert.Len(t, hooks.Unified.SessionStart, 1)
-}
-
-// TestClaudeLifecycle_OnSessionEnd verifies session end handler registration
-func TestClaudeLifecycle_OnSessionEnd(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	lifecycle := NewClaudeLifecycle(backend)
-
-	handler := agent.EventHandler{
-		Command: "echo cleanup",
-		Timeout: 30,
-	}
-
-	err := lifecycle.OnSessionEnd("/tmp", handler)
-	require.NoError(t, err)
-
-	hooks := lifecycle.GetHooks()
-	assert.NotNil(t, hooks)
-	assert.Len(t, hooks.Unified.SessionEnd, 1)
-}
-
-// TestClaudeLifecycle_OnToolUse verifies tool use handler registration
-func TestClaudeLifecycle_OnToolUse(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	lifecycle := NewClaudeLifecycle(backend)
-
-	handler := agent.EventHandler{
-		Command: "echo tool",
-		Timeout: 30,
-	}
-
-	t.Run("before tool use", func(t *testing.T) {
-		err := lifecycle.OnToolUse("/tmp", agent.BeforeToolUse, handler)
-		require.NoError(t, err)
-		hooks := lifecycle.GetHooks()
-		assert.Len(t, hooks.Unified.PreTool, 1)
-	})
-
-	t.Run("after tool use", func(t *testing.T) {
-		// Create fresh lifecycle for independent test
-		lifecycle2 := NewClaudeLifecycle(backend)
-		err := lifecycle2.OnToolUse("/tmp", agent.AfterToolUse, handler)
-		require.NoError(t, err)
-		hooks := lifecycle2.GetHooks()
-		assert.Len(t, hooks.Unified.PostTool, 1)
-	})
-}
-
-// TestClaudeLifecycle_Clear verifies handlers can be cleared
-func TestClaudeLifecycle_Clear(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	lifecycle := NewClaudeLifecycle(backend)
-
-	// Add some hooks first
-	_ = lifecycle.OnSessionStart("/tmp", agent.EventHandler{Command: "echo test"})
-
-	// Note: Clear will try to write to settings, which may fail in test
-	// We're just verifying it resets internal state
-	_ = lifecycle.Clear("/tmp")
-	hooks := lifecycle.GetHooks()
-	assert.NotNil(t, hooks)
-}
-
-// TestClaudeLifecycle_Flush verifies hooks and MCP are flushed
-func TestClaudeLifecycle_Flush(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	lifecycle := NewClaudeLifecycle(backend)
-
-	// Add some hooks
-	_ = lifecycle.OnSessionStart("/tmp", agent.EventHandler{Command: "echo test"})
-
-	// Flush will attempt file I/O; we're verifying it doesn't panic
-	_ = lifecycle.Flush("/tmp")
-}
-
-func TestClaudeMCPManager_RegisterServer(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	manager := NewClaudeMCPManager(backend)
-
-	server := agent.MCPServer{
-		Name:    "test-server",
-		Command: "test-cmd",
-		Args:    []string{"arg1"},
-	}
-
-	err := manager.RegisterServer("/tmp", server)
-	require.NoError(t, err)
-
-	servers, _ := manager.ListServers("/tmp")
-	assert.Len(t, servers, 1)
-	assert.Contains(t, servers, "test-server")
-}
-
-func TestClaudeMCPManager_UnregisterServer(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	manager := NewClaudeMCPManager(backend)
-
-	// Register first
-	server := agent.MCPServer{
-		Name:    "test-server",
-		Command: "test-cmd",
-	}
-	_ = manager.RegisterServer("/tmp", server)
-
-	err := manager.UnregisterServer("/tmp", "test-server")
-	require.NoError(t, err)
-
-	servers, _ := manager.ListServers("/tmp")
-	assert.Len(t, servers, 0)
-}
-
-func TestClaudeMCPManager_ListServers(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	manager := NewClaudeMCPManager(backend)
-
-	_ = manager.RegisterServer("/tmp", agent.MCPServer{Name: "server1"})
-	_ = manager.RegisterServer("/tmp", agent.MCPServer{Name: "server2"})
-
-	names, err := manager.ListServers("/tmp")
-	require.NoError(t, err)
-	assert.Len(t, names, 2)
-	assert.Contains(t, names, "server1")
-	assert.Contains(t, names, "server2")
-}
-
-func TestClaudeMCPManager_GetServer(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	manager := NewClaudeMCPManager(backend)
-
-	server := agent.MCPServer{
-		Name:    "test-server",
-		Command: "test-cmd",
-		Args:    []string{"arg1"},
-	}
-	_ = manager.RegisterServer("/tmp", server)
-
-	result, err := manager.GetServer("/tmp", "test-server")
-	require.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, server.Name, result.Name)
-	assert.Equal(t, server.Command, result.Command)
-}
-
-func TestClaudeMCPManager_GetServer_NotFound(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	manager := NewClaudeMCPManager(backend)
-
-	result, err := manager.GetServer("/tmp", "nonexistent")
-	require.NoError(t, err)
-	assert.Nil(t, result)
-}
-
-func TestClaudeMCPManager_Clear(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	manager := NewClaudeMCPManager(backend)
-
-	_ = manager.RegisterServer("/tmp", agent.MCPServer{Name: "server1"})
-
-	// Clear will attempt file I/O; we're verifying it clears internal state
-	_ = manager.Clear("/tmp")
-	servers, _ := manager.ListServers("/tmp")
-	assert.Len(t, servers, 0)
-}
-
-func TestClaudeSkills_Register(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	skills := &ClaudeSkills{
-		backend: backend,
-	}
-
-	skill := agent.Skill{
-		Name:        "test-skill",
-		Description: "Test skill",
-		Content:     "# Test Skill\n\nTest content",
-	}
-
-	// Register will attempt file I/O
-	err := skills.Register("/tmp", skill)
-	// We expect this to succeed or fail due to file I/O, not panic
-	_ = err
-}
-
-func TestClaudeSkills_RegisterAll(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	skills := &ClaudeSkills{
-		backend: backend,
-	}
-
-	skillList := []agent.Skill{
-		{
-			Name:        "skill1",
-			Description: "Skill 1",
-			Content:     "# Skill 1",
-		},
-		{
-			Name:        "skill2",
-			Description: "Skill 2",
-			Content:     "# Skill 2",
-		},
-	}
-
-	// RegisterAll will attempt file I/O
-	err := skills.RegisterAll("/tmp", skillList)
-	// We expect this to succeed or fail due to file I/O, not panic
-	_ = err
-}
-
-// TestClaudeSkills_Register_WritesToWorkdir exercises the on-disk
-// effect of Register against a tempdir, then asserts the slash-
-// command file and manifest entry land where we expect. Tightens the
-// existing "doesn't panic" smoke test.
-func TestClaudeSkills_Register_WritesToWorkdir(t *testing.T) {
-	workDir := t.TempDir()
-	skills := &ClaudeSkills{backend: NewClaudeCode(writeClaudeSettings)}
-	require.NoError(t, skills.Register(workDir, agent.Skill{
-		Name:        "test-skill",
-		Description: "Test skill",
-		Content:     "# Test Skill\n\nTest content",
-	}))
-
-	// Slash command file must exist somewhere under .claude/commands/.
-	cmds, err := os.ReadDir(filepath.Join(workDir, ".claude", "commands"))
-	require.NoError(t, err)
-	var found bool
-	for _, e := range cmds {
-		if strings.Contains(e.Name(), "test-skill") {
-			found = true
-		}
-	}
-	assert.True(t, found, "test-skill command file must land under .claude/commands/")
-
-	// Manifest must track it for later Clear/List.
-	manifest, err := os.ReadFile(filepath.Join(workDir, ".claude", "commands", ".ctxloom-manifest"))
-	require.NoError(t, err)
-	assert.Contains(t, string(manifest), "test-skill")
+// newClaudeLifecycle constructs the lifecycle the claude backend wires in
+// NewClaudeCode: the shared BaseLifecycle bound to the claude settings writer.
+func newClaudeLifecycle() *agent.BaseLifecycle {
+	return agent.NewBaseLifecycle("claude-code", writeClaudeSettings)
 }
 
 // TestClaudeSkills_RegisterFromContent covers the host-resolved export path: the
@@ -283,7 +26,7 @@ func TestClaudeSkills_Register_WritesToWorkdir(t *testing.T) {
 // resolved) and the skill writer just emits the command files.
 func TestClaudeSkills_RegisterFromContent(t *testing.T) {
 	workDir := t.TempDir()
-	skills := &ClaudeSkills{backend: NewClaudeCode(writeClaudeSettings)}
+	skills := &ClaudeSkills{}
 
 	require.NoError(t, skills.RegisterFromContent(workDir, []agent.CommandExport{
 		{Name: "from-bundle", Content: "body", Enabled: true, Description: "From a bundle"},
@@ -294,83 +37,8 @@ func TestClaudeSkills_RegisterFromContent(t *testing.T) {
 	assert.Contains(t, string(manifest), "from-bundle")
 }
 
-// TestClaudeSkills_List_NoManifest returns empty + nil when nothing
-// has been registered yet.
-func TestClaudeSkills_List_NoManifest(t *testing.T) {
-	skills := &ClaudeSkills{backend: NewClaudeCode(writeClaudeSettings)}
-	names, err := skills.List(t.TempDir())
-	require.NoError(t, err)
-	assert.Empty(t, names)
-}
-
-// TestClaudeSkills_List_StripsExtension reads back what Register wrote
-// and confirms the .md suffix is gone from the returned names.
-func TestClaudeSkills_List_StripsExtension(t *testing.T) {
-	workDir := t.TempDir()
-	skills := &ClaudeSkills{backend: NewClaudeCode(writeClaudeSettings)}
-	require.NoError(t, skills.RegisterAll(workDir, []agent.Skill{
-		{Name: "a", Content: "x"},
-		{Name: "b", Content: "y"},
-	}))
-
-	names, err := skills.List(workDir)
-	require.NoError(t, err)
-	for _, n := range names {
-		assert.NotContains(t, n, ".md", "List must strip the .md suffix")
-	}
-	// Both registered skills should appear.
-	got := map[string]bool{}
-	for _, n := range names {
-		got[n] = true
-	}
-	// names from WriteCommandFiles include subdir prefixes; check for
-	// any name containing "a" or "b".
-	var hasA, hasB bool
-	for n := range got {
-		if strings.HasSuffix(n, "a") {
-			hasA = true
-		}
-		if strings.HasSuffix(n, "b") {
-			hasB = true
-		}
-	}
-	assert.True(t, hasA && hasB, "both registered skills must surface in List: %v", names)
-}
-
-// TestClaudeSkills_Clear removes registered skills + manifest. After
-// Clear, List returns empty again.
-func TestClaudeSkills_Clear(t *testing.T) {
-	workDir := t.TempDir()
-	skills := &ClaudeSkills{backend: NewClaudeCode(writeClaudeSettings)}
-	require.NoError(t, skills.Register(workDir, agent.Skill{
-		Name: "doomed", Content: "x", Description: "to be cleared",
-	}))
-
-	// Sanity check
-	before, _ := skills.List(workDir)
-	require.NotEmpty(t, before, "fixture should have produced an entry")
-
-	require.NoError(t, skills.Clear(workDir))
-
-	after, err := skills.List(workDir)
-	require.NoError(t, err)
-	assert.Empty(t, after, "Clear must remove all tracked skills")
-
-	// Manifest itself is gone.
-	_, err = os.Stat(filepath.Join(workDir, ".claude", "commands", ".ctxloom-manifest"))
-	assert.True(t, os.IsNotExist(err), "manifest file must be removed")
-}
-
-// TestClaudeSkills_Clear_NoManifest is a no-op when no manifest exists
-// (fresh workdir).
-func TestClaudeSkills_Clear_NoManifest(t *testing.T) {
-	skills := &ClaudeSkills{backend: NewClaudeCode(writeClaudeSettings)}
-	require.NoError(t, skills.Clear(t.TempDir()), "Clear without manifest must succeed")
-}
-
 func TestClaudeContext_GetContextHash(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	context := NewClaudeContext(backend)
+	context := agent.NewBaseContextProvider()
 
 	// Write context to set hash
 	fragments := []*agent.Fragment{{Content: "test content"}}
@@ -381,24 +49,21 @@ func TestClaudeContext_GetContextHash(t *testing.T) {
 }
 
 func TestClaudeContext_GetContextHash_Empty(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	context := NewClaudeContext(backend)
+	context := agent.NewBaseContextProvider()
 
 	hash := context.GetContextHash()
 	assert.Equal(t, "", hash)
 }
 
 func TestClaudeContext_GetContextFilePath_Empty(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	context := NewClaudeContext(backend)
+	context := agent.NewBaseContextProvider()
 
 	path := context.GetContextFilePath()
 	assert.Equal(t, "", path)
 }
 
 func TestClaudeContext_GetContextFilePath_WithHash(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	context := NewClaudeContext(backend)
+	context := agent.NewBaseContextProvider()
 
 	// Provide context to generate a hash
 	tmpDir := t.TempDir()
@@ -411,8 +76,7 @@ func TestClaudeContext_GetContextFilePath_WithHash(t *testing.T) {
 }
 
 func TestClaudeContext_Clear(t *testing.T) {
-	backend := NewClaudeCode(writeClaudeSettings)
-	context := NewClaudeContext(backend)
+	context := agent.NewBaseContextProvider()
 
 	// Provide some context first
 	_ = context.Provide("/tmp", []*agent.Fragment{{Content: "test"}})
@@ -428,7 +92,7 @@ func TestClaudeContext_Clear(t *testing.T) {
 // covered host-side in internal/lm/backends (managed_test.go).
 
 func TestClaudeLifecycle_MergeManaged_AppendsContextInjection(t *testing.T) {
-	lifecycle := NewClaudeLifecycle(NewClaudeCode(writeClaudeSettings))
+	lifecycle := newClaudeLifecycle()
 
 	lifecycle.MergeManaged(&agent.ManagedConfig{
 		Hooks: &wire.HooksConfig{Plugins: map[string]wire.BackendHooks{}},
@@ -445,7 +109,7 @@ func TestClaudeLifecycle_MergeManaged_AppendsContextInjection(t *testing.T) {
 }
 
 func TestClaudeLifecycle_MergeManaged_NoContextHash(t *testing.T) {
-	lifecycle := NewClaudeLifecycle(NewClaudeCode(writeClaudeSettings))
+	lifecycle := newClaudeLifecycle()
 
 	// Host-assembled SessionStart hooks (e.g. bundle `hook session-bind`) ride in
 	// via ManagedConfig.Hooks; the agent appends only the context-injection hook,
@@ -474,7 +138,7 @@ func TestClaudeLifecycle_MergeManaged_NoContextHash(t *testing.T) {
 }
 
 func TestClaudeLifecycle_MergeManaged_MergesHooksAndMCP(t *testing.T) {
-	lifecycle := NewClaudeLifecycle(NewClaudeCode(writeClaudeSettings))
+	lifecycle := newClaudeLifecycle()
 
 	lifecycle.MergeManaged(&agent.ManagedConfig{
 		Hooks: &wire.HooksConfig{
@@ -502,7 +166,7 @@ func TestClaudeLifecycle_MergeManaged_MergesHooksAndMCP(t *testing.T) {
 func TestClaudeLifecycle_MergeManaged_Statusline(t *testing.T) {
 	t.Run("managed installs statusline", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		lifecycle := NewClaudeLifecycle(NewClaudeCode(memWriteClaudeSettings(fs)))
+		lifecycle := agent.NewBaseLifecycle("claude-code", memWriteClaudeSettings(fs))
 		lifecycle.MergeManaged(&agent.ManagedConfig{ManageStatusline: true}, "/proj", "")
 		require.NoError(t, lifecycle.Flush("/proj"))
 
@@ -513,7 +177,7 @@ func TestClaudeLifecycle_MergeManaged_Statusline(t *testing.T) {
 
 	t.Run("opt-out omits statusline", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		lifecycle := NewClaudeLifecycle(NewClaudeCode(memWriteClaudeSettings(fs)))
+		lifecycle := agent.NewBaseLifecycle("claude-code", memWriteClaudeSettings(fs))
 		lifecycle.MergeManaged(&agent.ManagedConfig{ManageStatusline: false}, "/proj", "")
 		require.NoError(t, lifecycle.Flush("/proj"))
 
@@ -524,13 +188,13 @@ func TestClaudeLifecycle_MergeManaged_Statusline(t *testing.T) {
 }
 
 func TestClaudeLifecycle_MergeManaged_NilIsNoOp(t *testing.T) {
-	lifecycle := NewClaudeLifecycle(NewClaudeCode(writeClaudeSettings))
+	lifecycle := newClaudeLifecycle()
 	lifecycle.MergeManaged(nil, "/tmp", "hash123") // must not panic
 	assert.Nil(t, lifecycle.GetHooks(), "nil managed config must not initialize hook state")
 }
 
 func TestClaudeLifecycle_GetMCP(t *testing.T) {
-	lifecycle := NewClaudeLifecycle(NewClaudeCode(writeClaudeSettings))
+	lifecycle := newClaudeLifecycle()
 
 	// Initially nil
 	assert.Nil(t, lifecycle.GetMCP())

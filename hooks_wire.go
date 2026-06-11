@@ -52,6 +52,38 @@ type HookSpecificOutput struct {
 	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
 }
 
+// --- SessionStart wire shapes ----------------------------------------------
+//
+// SessionStart is the context-injection event: Claude Code (and Codex, which
+// adopted the same shape) writes session identity to the hook's stdin and
+// accepts an additionalContext envelope on stdout. ctxloom's hook targets
+// (`ctxloom hook inject-context`, `ctxloom hook session-bind`) sit on this
+// wire; they import these types instead of redefining them.
+
+// HookEventSessionStart is the event name carried in SessionStart decisions.
+const HookEventSessionStart = "SessionStart"
+
+// SessionStartPayload is the JSON written to a SessionStart hook's stdin.
+// Claude Code provides session_id (and computes transcript_path); Codex
+// provides transcript_path directly. source distinguishes the launch kind.
+type SessionStartPayload struct {
+	SessionID      string `json:"session_id"`      // Claude Code: session identifier
+	TranscriptPath string `json:"transcript_path"` // Codex: full path to transcript file
+	Source         string `json:"source"`          // Claude Code SessionStart source: startup|resume|clear|compact
+}
+
+// SessionStartOutput is the JSON a SessionStart hook writes to stdout to
+// inject context. An empty output (no hookSpecificOutput) injects nothing.
+type SessionStartOutput struct {
+	HookSpecificOutput *SessionStartSpecificOutput `json:"hookSpecificOutput,omitempty"`
+}
+
+// SessionStartSpecificOutput carries the additional context to inject.
+type SessionStartSpecificOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext,omitempty"`
+}
+
 // DecodeHookPayload parses a hook stdin payload.
 func DecodeHookPayload(data []byte) (HookPayload, error) {
 	var p HookPayload

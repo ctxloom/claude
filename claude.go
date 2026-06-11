@@ -34,9 +34,27 @@ func (w *ClaudeCodeHookWriter) getFS() afero.Fs {
 	return agent.GetFS(w.FS)
 }
 
-// HooksPath returns the path to Claude Code's settings.json file.
-func (w *ClaudeCodeHookWriter) HooksPath(projectDir string) string {
+// ProjectSettingsPath returns the project-scoped Claude Code settings.json
+// path (.claude/settings.json under projectDir). Exported for companion tools
+// (ltk) that manage hooks in the same file, so the path convention has a
+// single source of truth.
+func ProjectSettingsPath(projectDir string) string {
 	return filepath.Join(projectDir, ".claude", "settings.json")
+}
+
+// GlobalSettingsPath returns the user-global Claude Code settings.json path
+// (~/.claude/settings.json).
+func GlobalSettingsPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".claude", "settings.json"), nil
+}
+
+// SettingsPath returns the path to Claude Code's settings.json file.
+func (w *ClaudeCodeHookWriter) SettingsPath(projectDir string) string {
+	return ProjectSettingsPath(projectDir)
 }
 
 // MCPConfigPath returns the path to Claude Code's .mcp.json file.
@@ -70,10 +88,11 @@ type claudeCodeMCPConfig struct {
 
 // claudeCodeMCPServer represents an MCP server configuration in Claude Code format.
 type claudeCodeMCPServer struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-	Cwd     string   `json:"cwd,omitempty"`      // Working directory for the server
-	SCM     string   `json:"_ctxloom,omitempty"` // Marker identifying ctxloom-managed servers
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`      // Environment variables for the server
+	Cwd     string            `json:"cwd,omitempty"`      // Working directory for the server
+	SCM     string            `json:"_ctxloom,omitempty"` // Marker identifying ctxloom-managed servers
 }
 
 // claudeCodeHookMatcher represents a hook matcher entry in Claude Code format.
@@ -145,16 +164,6 @@ func (w *ClaudeCodeHookWriter) WriteSettings(hooks *wire.HooksConfig, mcp *wire.
 
 	// Write MCP servers to .mcp.json (separate file where variable expansion works)
 	return w.writeMCPConfig(projectDir, mcp, bundleMCP)
-}
-
-// WriteHooks implements HookWriter for Claude Code (backwards compatible).
-func (w *ClaudeCodeHookWriter) WriteHooks(cfg *wire.HooksConfig, projectDir string) error {
-	return w.WriteSettings(cfg, nil, nil, projectDir)
-}
-
-// SettingsPath returns the path to Claude Code's settings.json file.
-func (w *ClaudeCodeHookWriter) SettingsPath(projectDir string) string {
-	return w.HooksPath(projectDir)
 }
 
 // loadSettings loads existing settings.json or returns empty settings.
@@ -389,43 +398,16 @@ func (w *ClaudeCodeHookWriter) removeCtxloomHooks(settings *claudeCodeSettings) 
 
 // addUnifiedHooks translates unified hooks to Claude Code format and adds them.
 func (w *ClaudeCodeHookWriter) addUnifiedHooks(settings *claudeCodeSettings, unified wire.UnifiedHooks) {
-	// PreTool -> PreToolUse
-	for _, h := range unified.PreTool {
-		w.addHook(settings, "PreToolUse", h)
-	}
-
-	// PostTool -> PostToolUse
-	for _, h := range unified.PostTool {
-		w.addHook(settings, "PostToolUse", h)
-	}
-
-	// SessionStart -> SessionStart
-	for _, h := range unified.SessionStart {
-		w.addHook(settings, "SessionStart", h)
-	}
-
-	// SessionEnd -> SessionEnd
-	for _, h := range unified.SessionEnd {
-		w.addHook(settings, "SessionEnd", h)
-	}
-
-	// PreShell -> PreToolUse with Bash matcher
-	for _, h := range unified.PreShell {
-		hook := h
-		if hook.Matcher == "" {
-			hook.Matcher = "Bash"
-		}
-		w.addHook(settings, "PreToolUse", hook)
-	}
-
-	// PostFileEdit -> PostToolUse with Edit|Write matcher
-	for _, h := range unified.PostFileEdit {
-		hook := h
-		if hook.Matcher == "" {
-			hook.Matcher = "Edit|Write"
-		}
-		w.addHook(settings, "PostToolUse", hook)
-	}
+	agent.RouteUnifiedHooks([]agent.HookRoute{
+		{Hooks: unified.PreTool, Event: "PreToolUse"},
+		{Hooks: unified.PostTool, Event: "PostToolUse"},
+		{Hooks: unified.SessionStart, Event: "SessionStart"},
+		{Hooks: unified.SessionEnd, Event: "SessionEnd"},
+		{Hooks: unified.PreShell, Event: "PreToolUse", DefaultMatcher: "Bash"},
+		{Hooks: unified.PostFileEdit, Event: "PostToolUse", DefaultMatcher: "Edit|Write"},
+	}, func(event string, h wire.Hook) {
+		w.addHook(settings, event, h)
+	})
 }
 
 // addBackendHooks adds backend-specific passthrough hooks.
@@ -537,6 +519,7 @@ func (w *ClaudeCodeHookWriter) addMCPServersToConfig(mcpConfig *claudeCodeMCPCon
 		mcpConfig.MCPServers[name] = claudeCodeMCPServer{
 			Command: server.Command,
 			Args:    server.Args,
+			Env:     server.Env,
 			SCM:     server.SCM, // Already marked ctxloom with bundle source
 		}
 	}
@@ -550,6 +533,7 @@ func (w *ClaudeCodeHookWriter) addMCPServersToConfig(mcpConfig *claudeCodeMCPCon
 		mcpConfig.MCPServers[name] = claudeCodeMCPServer{
 			Command: server.Command,
 			Args:    server.Args,
+			Env:     server.Env,
 			SCM:     agent.ComputeMCPServerHash(server), // Marker for ctxloom-managed
 		}
 	}
@@ -560,6 +544,7 @@ func (w *ClaudeCodeHookWriter) addMCPServersToConfig(mcpConfig *claudeCodeMCPCon
 			mcpConfig.MCPServers[name] = claudeCodeMCPServer{
 				Command: server.Command,
 				Args:    server.Args,
+				Env:     server.Env,
 				SCM:     agent.ComputeMCPServerHash(server),
 			}
 		}

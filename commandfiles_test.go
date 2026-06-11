@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ctxloom/shared/agent"
 )
 
@@ -25,9 +28,9 @@ func TestTransformMustacheToPositional(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformMustacheToPositional(tt.input)
+			result := agent.TransformMustacheToPositional(tt.input)
 			if result != tt.expected {
-				t.Errorf("transformMustacheToPositional(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+				t.Errorf("TransformMustacheToPositional(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
 			}
 		})
 	}
@@ -174,6 +177,69 @@ func TestWriteCommandFilesEmptyPrompts(t *testing.T) {
 	}
 }
 
+// TestWriteCommandFiles_SkipsTraversalNames verifies command names from
+// bundle content (potentially remote) cannot derive paths outside
+// .claude/commands/: absolute and ".."-bearing names are skipped before any
+// file is written, while plain and nested ("group/cmd", flattened) names
+// still land.
+func TestWriteCommandFiles_SkipsTraversalNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	cmds := []agent.CommandExport{
+		{Name: "../escape", Content: "evil", Enabled: true},
+		{Name: "/abs/path", Content: "evil", Enabled: true},
+		{Name: "a/../../b", Content: "evil", Enabled: true},
+		{Name: "good", Content: "fine", Enabled: true},
+		{Name: "group/cmd", Content: "nested fine", Enabled: true},
+	}
+	require.NoError(t, WriteCommandFiles(tmpDir, cmds))
+
+	commandsDir := filepath.Join(tmpDir, ".claude", "commands")
+	for _, p := range []string{
+		filepath.Join(commandsDir, "good.md"),
+		filepath.Join(commandsDir, "group-cmd.md"), // nested names flatten
+	} {
+		_, err := os.Stat(p)
+		assert.NoError(t, err, "legit command %s must be written", p)
+	}
+	// Malicious names are skipped entirely — not even written flattened.
+	entries, err := os.ReadDir(commandsDir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.NotContains(t, e.Name(), "escape")
+		assert.NotContains(t, e.Name(), "abs")
+		assert.NotEqual(t, "a-..-..-b.md", e.Name())
+	}
+
+	manifest, err := os.ReadFile(filepath.Join(commandsDir, ".ctxloom-manifest"))
+	require.NoError(t, err)
+	assert.Contains(t, string(manifest), "good.md")
+	assert.Contains(t, string(manifest), "group-cmd.md")
+	assert.NotContains(t, string(manifest), "escape")
+}
+
+// TestWriteCommandFiles_ManifestTraversalLinesNotDeleted verifies the
+// pre-write manifest cleanup never follows a doctored manifest line outside
+// the commands tree, while legit stale entries are still removed.
+func TestWriteCommandFiles_ManifestTraversalLinesNotDeleted(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, ".claude", "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	victim := filepath.Join(tmpDir, "victim.txt")
+	require.NoError(t, os.WriteFile(victim, []byte("keep"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "old.md"), []byte("stale"), 0644))
+	manifest := "../../victim.txt\n" + victim + "\nold.md\n"
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, ".ctxloom-manifest"), []byte(manifest), 0644))
+
+	cmds := []agent.CommandExport{{Name: "new", Content: "x", Enabled: true}}
+	require.NoError(t, WriteCommandFiles(tmpDir, cmds))
+
+	_, err := os.Stat(victim)
+	assert.NoError(t, err, "manifest traversal line must not delete outside the commands tree")
+	_, err = os.Stat(filepath.Join(commandsDir, "old.md"))
+	assert.True(t, os.IsNotExist(err), "legit stale manifest entry still removed")
+}
+
 func TestEscapeYAMLString(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -190,9 +256,9 @@ func TestEscapeYAMLString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := escapeYAMLString(tt.input)
+			result := agent.EscapeYAMLString(tt.input)
 			if result != tt.expected {
-				t.Errorf("escapeYAMLString(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("EscapeYAMLString(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}

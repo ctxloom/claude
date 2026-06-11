@@ -21,7 +21,7 @@ func TestClaudeSessionHistory_New(t *testing.T) {
 
 	assert.NotNil(t, history)
 	assert.Equal(t, backend, history.backend)
-	assert.NotNil(t, history.fs)
+	assert.NotNil(t, history.FS)
 }
 
 func TestClaudeSessionHistory_WithOptions(t *testing.T) {
@@ -34,8 +34,8 @@ func TestClaudeSessionHistory_WithOptions(t *testing.T) {
 	)
 
 	assert.NotNil(t, history)
-	assert.Equal(t, fs, history.fs)
-	assert.Equal(t, "/test/home", history.homeDir)
+	assert.Equal(t, fs, history.FS)
+	assert.Equal(t, "/test/home", history.HomeDir)
 }
 
 func TestClaudeSessionHistory_ListSessions(t *testing.T) {
@@ -413,49 +413,4 @@ func TestClaudeSessionHistory_FindProjectDir(t *testing.T) {
 	result, err := history.findProjectDir(workDir)
 	require.NoError(t, err)
 	assert.Equal(t, projectDir, result)
-}
-
-func TestClaudeSessionHistory_FindSessionFile(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	backend := NewClaudeCode(writeClaudeSettings)
-
-	homeDir := "/test/home"
-	workDir := "/test/project"
-	projectName := "-test-project"
-	projectDir := filepath.Join(homeDir, ".claude", "projects", projectName)
-	sessionFile := filepath.Join(projectDir, "session.jsonl")
-
-	require.NoError(t, fs.MkdirAll(projectDir, 0755))
-	require.NoError(t, afero.WriteFile(fs, sessionFile, []byte("{}"), 0644))
-
-	history := NewClaudeSessionHistory(backend,
-		WithClaudeSessionFS(fs),
-		WithClaudeSessionHomeDir(homeDir),
-	)
-
-	result, err := history.findSessionFile(workDir)
-	require.NoError(t, err)
-	assert.Equal(t, sessionFile, result)
-}
-
-func TestClaudeSessionHistory_FindSessionFile_NotFound(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	backend := NewClaudeCode(writeClaudeSettings)
-
-	homeDir := "/test/home"
-	workDir := "/test/project"
-	projectName := "-test-project"
-	projectDir := filepath.Join(homeDir, ".claude", "projects", projectName)
-
-	require.NoError(t, fs.MkdirAll(projectDir, 0755))
-	// Don't create session.jsonl
-
-	history := NewClaudeSessionHistory(backend,
-		WithClaudeSessionFS(fs),
-		WithClaudeSessionHomeDir(homeDir),
-	)
-
-	_, err := history.findSessionFile(workDir)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "session file not found")
 }

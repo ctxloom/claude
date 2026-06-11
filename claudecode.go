@@ -41,10 +41,9 @@ func NewClaudeCode(writeSettings agent.WriteSettingsFunc) *ClaudeCode {
 	b.BaseBackend = agent.NewBaseBackend("claude-code", "1.0.0")
 	b.BinaryPath = "claude"
 	b.InitLaunch(
-		NewClaudeLifecycle(b),
-		&ClaudeSkills{backend: b},
-		NewClaudeContext(b),
-		NewClaudeMCPManager(b),
+		agent.NewBaseLifecycle("claude-code", b.writeSettings),
+		&ClaudeSkills{},
+		agent.NewBaseContextProvider(),
 		NewClaudeSessionHistory(b),
 	)
 	return b
@@ -52,18 +51,8 @@ func NewClaudeCode(writeSettings agent.WriteSettingsFunc) *ClaudeCode {
 
 // Configure applies a decoded claude-code config to this backend.
 func (b *ClaudeCode) Configure(cfg agent.BackendConfig) {
-	c, ok := cfg.(*ClaudeConfig)
-	if !ok {
-		return
-	}
-	if c.BinaryPath != "" {
-		b.BinaryPath = c.BinaryPath
-	}
-	if len(c.Args) > 0 {
-		b.Args = c.Args
-	}
-	for k, v := range c.Env {
-		b.Env[k] = v
+	if c, ok := cfg.(*ClaudeConfig); ok {
+		agent.ApplyLocalCLIConfig(&b.BaseBackend, c.BinaryPath, c.Args, c.Env)
 	}
 }
 
