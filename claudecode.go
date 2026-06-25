@@ -31,6 +31,10 @@ func (ClaudeConfig) BackendType() string { return "claude-code" }
 type ClaudeCode struct {
 	agent.LaunchBackend
 	writeSettings agent.WriteSettingsFunc
+	// openChatTransport opens the stream-json transport for the StructuredChat
+	// capability. Defaults to spawnChatTransport (a real `claude` subprocess);
+	// tests override it with in-memory pipes so they never spawn a process.
+	openChatTransport chatTransportFunc
 }
 
 // NewClaudeCode creates a new Claude Code backend with default settings. The
