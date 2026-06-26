@@ -98,11 +98,35 @@ func TestMapStreamJSONEvent_MultiBlockAssistant_ExpandsInOrder(t *testing.T) {
 		{"type":"tool_use","name":"Read","input":{"path":"x"}},
 		{"type":"text","text":"done"}]}}`)
 	evs := mapStreamJSONEvent(raw)
-	require.Len(t, evs, 2)
+	require.Len(t, evs, 3)
 	require.NotNil(t, evs[0].Entry)
-	assert.Equal(t, agent.EntryTypeToolUse, evs[0].Entry.Type)
-	assert.Equal(t, "Read", evs[0].Entry.ToolName)
+	assert.Equal(t, agent.EntryTypeThinking, evs[0].Entry.Type)
+	assert.Equal(t, "hmm", evs[0].Entry.Content)
 	require.NotNil(t, evs[1].Entry)
-	assert.Equal(t, agent.EntryTypeAssistant, evs[1].Entry.Type)
-	assert.Equal(t, "done", evs[1].Entry.Content)
+	assert.Equal(t, agent.EntryTypeToolUse, evs[1].Entry.Type)
+	assert.Equal(t, "Read", evs[1].Entry.ToolName)
+	require.NotNil(t, evs[2].Entry)
+	assert.Equal(t, agent.EntryTypeAssistant, evs[2].Entry.Type)
+	assert.Equal(t, "done", evs[2].Entry.Content)
+}
+
+func TestMapStreamJSONEvent_Thinking_OneThinkingEntry(t *testing.T) {
+	raw := []byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"let me reason","signature":"sig"}]}}`)
+	evs := mapStreamJSONEvent(raw)
+	require.Len(t, evs, 1)
+	require.NotNil(t, evs[0].Entry)
+	assert.Equal(t, agent.EntryTypeThinking, evs[0].Entry.Type)
+	assert.Equal(t, "let me reason", evs[0].Entry.Content)
+}
+
+func TestMapStreamJSONEvent_EmptyThinking_EmittedAsMarker(t *testing.T) {
+	// claude-code's -p stream-json redacts thinking text to "" (signature only).
+	// The live stream still emits a content-less thinking marker so a frontend can
+	// show the model reasoned this turn.
+	raw := []byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"","signature":"sig"}]}}`)
+	evs := mapStreamJSONEvent(raw)
+	require.Len(t, evs, 1)
+	require.NotNil(t, evs[0].Entry)
+	assert.Equal(t, agent.EntryTypeThinking, evs[0].Entry.Type)
+	assert.Equal(t, "", evs[0].Entry.Content)
 }

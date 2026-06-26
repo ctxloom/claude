@@ -8,6 +8,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ctxloom/shared/agent"
 )
@@ -35,6 +36,10 @@ type ClaudeCode struct {
 	// capability. Defaults to spawnChatTransport (a real `claude` subprocess);
 	// tests override it with in-memory pipes so they never spawn a process.
 	openChatTransport chatTransportFunc
+	// now stamps chat-stream entries that arrive without a timestamp — claude-code's
+	// stream-json carries no per-event time, so we record receipt time here so the
+	// protocol always has one. Injected for deterministic tests; nil means time.Now.
+	now func() time.Time
 }
 
 // NewClaudeCode creates a new Claude Code backend with default settings. The

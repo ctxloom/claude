@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/ctxloom/shared/agent"
 )
@@ -56,7 +57,7 @@ func (b *ClaudeCode) Chat(parentCtx context.Context, req agent.ChatRequest, in <
 
 	// Reader: stdout NDJSON → normalized events → out. Closes readerDone on exit.
 	readerDone := make(chan struct{})
-	go readChatEvents(ctx, tr.stdout, out, readerDone)
+	go readChatEvents(ctx, tr.stdout, out, readerDone, b.clock())
 
 	// teardown closes the transport (unblocking a parked reader) then waits for
 	// the reader to finish, so no send races the deferred close(out).
@@ -87,10 +88,20 @@ func (b *ClaudeCode) Chat(parentCtx context.Context, req agent.ChatRequest, in <
 	}
 }
 
+// clock returns the timestamp source for chat entries, defaulting to time.Now
+// when none was injected.
+func (b *ClaudeCode) clock() func() time.Time {
+	if b.now != nil {
+		return b.now
+	}
+	return time.Now
+}
+
 // readChatEvents reads newline-delimited JSON from stdout (no line-length cap —
 // tool outputs can be large) and maps each line to ChatEvents on out, stopping
-// on EOF/error or ctx cancellation.
-func readChatEvents(ctx context.Context, stdout io.Reader, out chan<- agent.ChatEvent, done chan<- struct{}) {
+// on EOF/error or ctx cancellation. Each entry is stamped with a receipt time
+// (see stampEntryTime) since stream-json carries no per-event timestamp.
+func readChatEvents(ctx context.Context, stdout io.Reader, out chan<- agent.ChatEvent, done chan<- struct{}, now func() time.Time) {
 	defer close(done)
 	br := bufio.NewReaderSize(stdout, 64*1024)
 	for {
@@ -98,7 +109,7 @@ func readChatEvents(ctx context.Context, stdout io.Reader, out chan<- agent.Chat
 		if len(line) > 0 {
 			for _, ev := range mapStreamJSONEvent(line) {
 				select {
-				case out <- ev:
+				case out <- stampEntryTime(ev, now):
 				case <-ctx.Done():
 					return
 				}
@@ -108,6 +119,17 @@ func readChatEvents(ctx context.Context, stdout io.Reader, out chan<- agent.Chat
 			return // EOF or read error (e.g. transport closed)
 		}
 	}
+}
+
+// stampEntryTime records receipt time on an entry event that arrived without a
+// timestamp. claude-code's stream-json carries no per-event time, so the live
+// chat stream always lands here; a transcript-derived entry already has one and
+// is left untouched. Clock-injected so the fallback is deterministic in tests.
+func stampEntryTime(ev agent.ChatEvent, now func() time.Time) agent.ChatEvent {
+	if ev.Entry != nil && ev.Entry.Timestamp.IsZero() {
+		ev.Entry.Timestamp = now()
+	}
+	return ev
 }
 
 // sjUserOut is the NDJSON user message written to stdin, matching claude's

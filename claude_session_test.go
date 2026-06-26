@@ -218,10 +218,11 @@ func TestClaudeSessionHistory_ModernBlockSchema(t *testing.T) {
 	// transcript: assistant content = [thinking, text, tool_use]; the tool
 	// result comes back as a user message with a tool_result block; metadata
 	// lines (mode/file-history-snapshot) and isSidechain sub-agent lines must
-	// be excluded from the main thread.
+	// be excluded from the main thread. A thinking block becomes its own
+	// thinking entry (preserving block order), so a frontend can style/toggle it.
 	content := `{"type":"file-history-snapshot","timestamp":"2026-06-01T10:00:00Z"}
 {"type":"user","timestamp":"2026-06-01T10:00:01Z","message":{"role":"user","content":"Merge PR 8"}}
-{"type":"assistant","timestamp":"2026-06-01T10:00:02Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"internal reasoning, should be dropped"},{"type":"text","text":"I'll check PR 8 first."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"gh pr view 8"}}]}}
+{"type":"assistant","timestamp":"2026-06-01T10:00:02Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"internal reasoning"},{"type":"text","text":"I'll check PR 8 first."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"gh pr view 8"}}]}}
 {"type":"user","timestamp":"2026-06-01T10:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"PR 8 is open","is_error":false}]}}
 {"type":"assistant","isSidechain":true,"timestamp":"2026-06-01T10:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"SIDECHAIN_SHOULD_NOT_APPEAR"}]}}`
 
@@ -236,24 +237,27 @@ func TestClaudeSessionHistory_ModernBlockSchema(t *testing.T) {
 	// Sidechain text must never leak into the main-thread entries.
 	for _, e := range session.Entries {
 		assert.NotContains(t, e.Content, "SIDECHAIN_SHOULD_NOT_APPEAR", "sidechain content must be excluded")
-		assert.NotContains(t, e.Content, "internal reasoning", "thinking blocks must be dropped")
 	}
 
-	require.Len(t, session.Entries, 4)
+	require.Len(t, session.Entries, 5)
 
 	assert.Equal(t, agent.EntryTypeUser, session.Entries[0].Type)
 	assert.Equal(t, "Merge PR 8", session.Entries[0].Content)
 
-	assert.Equal(t, agent.EntryTypeAssistant, session.Entries[1].Type)
-	assert.Equal(t, "I'll check PR 8 first.", session.Entries[1].Content)
+	// thinking precedes the prose it produced, as its own entry.
+	assert.Equal(t, agent.EntryTypeThinking, session.Entries[1].Type)
+	assert.Equal(t, "internal reasoning", session.Entries[1].Content)
 
-	assert.Equal(t, agent.EntryTypeToolUse, session.Entries[2].Type)
-	assert.Equal(t, "Bash", session.Entries[2].ToolName)
-	assert.Contains(t, string(session.Entries[2].ToolInput), "gh pr view 8")
+	assert.Equal(t, agent.EntryTypeAssistant, session.Entries[2].Type)
+	assert.Equal(t, "I'll check PR 8 first.", session.Entries[2].Content)
 
-	assert.Equal(t, agent.EntryTypeToolResult, session.Entries[3].Type)
-	assert.Equal(t, "PR 8 is open", session.Entries[3].ToolOutput)
-	assert.False(t, session.Entries[3].IsError)
+	assert.Equal(t, agent.EntryTypeToolUse, session.Entries[3].Type)
+	assert.Equal(t, "Bash", session.Entries[3].ToolName)
+	assert.Contains(t, string(session.Entries[3].ToolInput), "gh pr view 8")
+
+	assert.Equal(t, agent.EntryTypeToolResult, session.Entries[4].Type)
+	assert.Equal(t, "PR 8 is open", session.Entries[4].ToolOutput)
+	assert.False(t, session.Entries[4].IsError)
 }
 
 // Previous-session resolution moved to ctxloom (operations.ResolvePreviousSession,

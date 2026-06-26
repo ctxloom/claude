@@ -3,7 +3,7 @@ module github.com/ctxloom/claude
 go 1.25.0
 
 require (
-	github.com/ctxloom/shared v0.0.0-20260625162745-338f8661748c
+	github.com/ctxloom/shared v0.0.0-20260626051133-bb2afb70d5b9
 	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.11.1
 )

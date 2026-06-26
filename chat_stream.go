@@ -36,12 +36,13 @@ type sjMessage struct {
 }
 
 type sjBlock struct {
-	Type    string          `json:"type"`
-	Text    string          `json:"text"`
-	Name    string          `json:"name"`
-	Input   json.RawMessage `json:"input"`
-	Content json.RawMessage `json:"content"` // tool_result payload: string OR blocks
-	IsError bool            `json:"is_error"`
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking string          `json:"thinking"` // thinking block: reasoning prose (not in Text)
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
+	Content  json.RawMessage `json:"content"` // tool_result payload: string OR blocks
+	IsError  bool            `json:"is_error"`
 }
 
 type sjUsage struct {
@@ -91,7 +92,8 @@ func mapStreamJSONEvent(raw []byte) []agent.ChatEvent {
 }
 
 // mapAssistantBlocks turns an assistant message's content blocks into entries:
-// text → assistant, tool_use → tool_use; thinking and other blocks are dropped.
+// text → assistant, thinking → thinking, tool_use → tool_use; other blocks are
+// dropped.
 func mapAssistantBlocks(m *sjMessage) []agent.ChatEvent {
 	if m == nil {
 		return nil
@@ -112,6 +114,20 @@ func mapAssistantBlocks(m *sjMessage) []agent.ChatEvent {
 			if b.Text != "" {
 				out = append(out, agent.ChatEvent{Entry: &agent.SessionEntry{Type: agent.EntryTypeAssistant, Content: b.Text}})
 			}
+		case "thinking":
+			// Emit a thinking marker even when the text is blank. NOTE: claude-code
+			// intentionally strips the reasoning text from its `-p --output-format
+			// stream-json` output — the block arrives as {type:"thinking",
+			// thinking:"", signature:"…"}, signature only, and no thinking_delta
+			// events are emitted even with --include-partial-messages. The signature
+			// is kept for multi-turn API replay; the prose is withheld from
+			// programmatic consumers by design (the TUI shows it ephemerally instead).
+			// So b.Thinking is empty in practice, but we still surface the block as a
+			// content-less entry so a live frontend can show that the model reasoned
+			// this turn. There are no timestamps in stream-json — only the turn-level
+			// timing carried by the result/Complete event. Content carries the prose
+			// unchanged if a future build (or a direct-API backend) ever provides it.
+			out = append(out, agent.ChatEvent{Entry: &agent.SessionEntry{Type: agent.EntryTypeThinking, Content: b.Thinking}})
 		case "tool_use":
 			out = append(out, agent.ChatEvent{Entry: &agent.SessionEntry{
 				Type:      agent.EntryTypeToolUse,

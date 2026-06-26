@@ -174,12 +174,13 @@ type claudeMessage struct {
 // claudeBlock is one content block in the modern array schema: text/thinking
 // for prose, tool_use for calls, tool_result for outputs.
 type claudeBlock struct {
-	Type    string          `json:"type"`
-	Text    string          `json:"text"`
-	Name    string          `json:"name"`
-	Input   json.RawMessage `json:"input"`
-	Content json.RawMessage `json:"content"`
-	IsError bool            `json:"is_error"`
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking string          `json:"thinking"` // thinking block: reasoning prose (not in Text)
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
+	Content  json.RawMessage `json:"content"`
+	IsError  bool            `json:"is_error"`
 }
 
 // parseEntries converts one Claude JSONL line into zero or more normalized
@@ -247,8 +248,8 @@ func claudeBlocks(message json.RawMessage) []claudeBlock {
 
 // claudeMessageEntries decomposes one user/assistant message's content blocks
 // into normalized entries, preserving order: prose text becomes a proseType
-// entry, tool_use becomes a ToolUse entry, tool_result becomes a ToolResult
-// entry. thinking and other block types are intentionally dropped.
+// entry, thinking becomes a Thinking entry, tool_use becomes a ToolUse entry,
+// tool_result becomes a ToolResult entry. Other block types are dropped.
 func claudeMessageEntries(message json.RawMessage, ts time.Time, proseType agent.SessionEntryType) []agent.SessionEntry {
 	var out []agent.SessionEntry
 	var text strings.Builder
@@ -266,6 +267,20 @@ func claudeMessageEntries(message json.RawMessage, ts time.Time, proseType agent
 					text.WriteString("\n")
 				}
 				text.WriteString(b.Text)
+			}
+		case "thinking":
+			// b.Thinking is usually empty: claude-code strips reasoning text before it
+			// reaches its transcripts (see the NOTE in chat_stream.go mapAssistantBlocks).
+			// Unlike the live chat stream — which emits a content-less marker so a
+			// frontend can show "reasoned this turn" — the transcript feeds distillation,
+			// so empty thinking is dropped here to keep essences free of content-free
+			// noise. Real reasoning prose (if ever present) is carried through, stamped
+			// with the message timestamp (blocks in a line share one timestamp).
+			if b.Thinking != "" {
+				// Flush any prose accumulated before this block so order is preserved
+				// (thinking precedes the answer it produced).
+				flushText()
+				out = append(out, agent.SessionEntry{Timestamp: ts, Type: agent.EntryTypeThinking, Content: b.Thinking})
 			}
 		case "tool_use":
 			flushText()
