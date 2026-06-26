@@ -19,6 +19,7 @@ func TestClaudeAgentName(t *testing.T) {
 		{"Test_Writer", "test-writer"},
 		{"bundle/Code Review!!", "code-review"},
 		{"--Weird--", "weird"},
+		{"/abs", "abs"}, // leading slash: leaf stripped, then hyphen-trimmed
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
