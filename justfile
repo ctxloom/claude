@@ -11,6 +11,12 @@ test *ARGS:
 vet:
     go vet {{TOP}}/...
 
+# Run mutation testing (gremlins) over the module. Extra flags pass through via
+# ARGS, e.g. `just mutation --dry-run`. Run from the module root so gremlins
+# discovers go.mod and the test suite.
+mutation *ARGS:
+    cd {{TOP}} && go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash {{ARGS}}
+
 # Tidy module dependencies.
 tidy:
     go mod tidy
