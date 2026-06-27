@@ -1,0 +1,93 @@
+# Versionator Configuration
+# See https://github.com/benjaminabbitt/versionator for documentation
+
+# Version prefix (e.g., "v" for v1.2.3)
+# Set to empty string for no prefix
+prefix: "v"
+
+# Pre-release configuration
+# Pre-release follows SemVer 2.0.0: appended with dash (-)
+# Note: Template is specified inline in justfile for Go module compatibility
+prerelease:
+  # Disabled - using inline template in justfile instead
+  enabled: false
+
+  # Template for reference (used inline in justfile):
+  # Format: v0.0.1-abc1234.20240115103045 (uncommitted) or v0.0.1-abc1234 (clean)
+  # DateTimeDirty requires versionator >= v0.2.0.
+  template: "{{ShortHash}}{{DateTimeDirty}}"
+
+# Build metadata configuration
+# Disabled for Go compatibility - Go modules ignore metadata after +
+metadata:
+  # Set to false for Go projects (metadata is ignored by go mod)
+  enabled: false
+
+  # Metadata type (currently only "git" supported)
+  type: "git"
+
+  # Mustache template string for build metadata
+  template: "{{ShortHash}}"
+
+  # Git-specific configuration
+  git:
+    # Length of commit hash for MediumHash variable
+    hashLength: 12
+
+# Logging configuration
+logging:
+  # Output format: console, json, development
+  output: "console"
+
+# =============================================================================
+# AVAILABLE TEMPLATE VARIABLES
+# =============================================================================
+#
+# Version Components:
+#   {{Major}}, {{Minor}}, {{Patch}}  - Version numbers
+#   {{MajorMinorPatch}}              - Core version (1.2.3)
+#   {{MajorMinor}}                   - Major.Minor (1.2)
+#   {{Prefix}}                       - Version prefix (v)
+#
+# Pre-release (from VERSION file):
+#   {{PreRelease}}                   - Full pre-release string
+#   {{PreReleaseWithDash}}           - With dash prefix (-alpha.5)
+#   {{PreReleaseLabel}}              - Label only (alpha from alpha.5)
+#   {{PreReleaseNumber}}             - Number only (5 from alpha.5)
+#
+# Metadata (from VERSION file):
+#   {{Metadata}}                     - Full metadata string
+#   {{MetadataWithPlus}}             - With plus prefix (+build.123)
+#
+# VCS/Git Information:
+#   {{Hash}}                         - Full commit hash (40 chars for git)
+#   {{ShortHash}}                    - Short hash (7 chars)
+#   {{MediumHash}}                   - Medium hash (12 chars)
+#   {{BranchName}}                   - Current branch name
+#   {{EscapedBranchName}}            - Branch with / replaced by -
+#   {{CommitsSinceTag}}              - Commits since last tag
+#   {{BuildNumber}}                  - Alias for CommitsSinceTag
+#   {{BuildNumberPadded}}            - Padded to 4 digits (0042)
+#   {{UncommittedChanges}}           - Count of dirty files
+#   {{Dirty}}                        - "dirty" if uncommitted changes
+#   {{VersionSourceHash}}            - Hash of last tag's commit
+#
+# Commit Author:
+#   {{CommitAuthor}}                 - Commit author name
+#   {{CommitAuthorEmail}}            - Commit author email
+#
+# Commit Timestamps (UTC):
+#   {{CommitDate}}                   - ISO 8601 (2024-01-15T10:30:00Z)
+#   {{CommitDateCompact}}            - Compact (20240115103045)
+#   {{CommitDateShort}}              - Date only (2024-01-15)
+#   {{CommitYear}}, {{CommitMonth}}, {{CommitDay}}
+#
+# Build Timestamps (UTC):
+#   {{BuildDateTimeUTC}}             - ISO 8601 (2024-01-15T10:30:00Z)
+#   {{BuildDateTimeCompact}}         - Compact (20240115103045)
+#   {{BuildDateUTC}}                 - Date only (2024-01-15)
+#   {{BuildYear}}, {{BuildMonth}}, {{BuildDay}}
+#
+# Plugin Variables (git plugin):
+#   {{GitShortHash}}                 - Prefixed short hash (git.abc1234)
+#   {{ShaShortHash}}                 - Prefixed short hash (sha.abc1234)

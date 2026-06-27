@@ -1,7 +1,14 @@
 # claude — ctxloom's Claude Code agent module. Depends only on
-# github.com/ctxloom/shared (resolved locally via the org go.work). Tests run on
-# the host (no devcontainer, no build tags).
+# github.com/ctxloom/shared (resolved via the org go.work on the host).
 TOP := `git rev-parse --show-toplevel`
+
+# Show the current version (versionator; reads VERSION + git).
+show-version:
+    @versionator output version
+
+# Compile-check all packages (library — no binary to stamp).
+build:
+    go build {{TOP}}/...
 
 # Run the package tests under -race.
 test *ARGS:
@@ -14,3 +21,6 @@ vet:
 # Tidy module dependencies.
 tidy:
     go mod tidy
+
+# CI entrypoint: vet + race tests.
+check: vet test
