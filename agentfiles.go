@@ -88,8 +88,18 @@ func WriteAgentFiles(workDir string, agents []AgentExport, opts ...agent.Command
 	return agent.WriteManagedCommandFiles(fs, agentsDir, ".ctxloom-agents-manifest", cmds,
 		func(c agent.CommandExport) (string, []byte, error) {
 			a := byName[c.Name]
-			filename := strings.ReplaceAll(a.Name, "/", "-") + ".md"
-			return filename, []byte(TransformToClaudeAgent(a)), nil
+			// Name the file by the same slug used as the sub-agent's frontmatter
+			// `name`, so file identity and sub-agent identity agree (Claude Code
+			// invokes by the frontmatter name, not the filename). Using the raw
+			// name instead let two rosters differing only in case/punctuation
+			// ("Foo"/"foo") write distinct files that both declared name: foo. An
+			// empty slug yields an empty relPath, which WriteManagedCommandFiles
+			// skips with a warning rather than writing a nameless ".md".
+			slug := claudeAgentName(a.Name)
+			if slug == "" {
+				return "", nil, nil
+			}
+			return slug + ".md", []byte(TransformToClaudeAgent(a)), nil
 		})
 }
 

@@ -418,3 +418,34 @@ func TestClaudeSessionHistory_FindProjectDir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, projectDir, result)
 }
+
+// Claude Code names a project's transcript dir by replacing EVERY non-alphanumeric
+// byte of the absolute cwd with '-' (no run collapsing), not just the path
+// separator. A workDir containing '.', '_', and a space must therefore resolve to
+// the dir where '/.' became '--', '_' became '-', and ' ' became '-'. The pre-fix
+// '/'-only encoding derived a directory that does not exist for any such path,
+// silently breaking session history/recovery. claude-code-01-001 / dry-claude-002.
+func TestClaudeSessionHistory_ProjectDirEncoding_NonAlnum(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	backend := NewClaudeCode(writeClaudeSettings)
+
+	homeDir := "/home/user"
+	workDir := "/home/user/.config/my_proj v2"
+	projectName := "-home-user--config-my-proj-v2"
+	projectDir := filepath.Join(homeDir, ".claude", "projects", projectName)
+	require.NoError(t, fs.MkdirAll(projectDir, 0755))
+
+	history := NewClaudeSessionHistory(backend,
+		WithClaudeSessionFS(fs),
+		WithClaudeSessionHomeDir(homeDir),
+	)
+
+	result, err := history.findProjectDir(workDir)
+	require.NoError(t, err)
+	assert.Equal(t, projectDir, result)
+
+	// TranscriptPathFromHook must use the same encoding so the SessionStart hook
+	// resolves to the same file findProjectDir/ListSessions read.
+	got := history.TranscriptPathFromHook(workDir, "sess1", "")
+	assert.Equal(t, filepath.Join(projectDir, "sess1.jsonl"), got)
+}

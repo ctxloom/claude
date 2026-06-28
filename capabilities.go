@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -114,28 +115,52 @@ func (h *ClaudeSessionHistory) GetSessionByPath(path string) (*agent.Session, er
 	return h.parseSessionFile(path)
 }
 
-// findProjectDir finds the Claude project directory for the given workDir.
-// Claude Code converts paths by replacing / with - and prefixing with -.
-// Example: /home/user/project -> -home-user-project
-func (h *ClaudeSessionHistory) findProjectDir(workDir string) (string, error) {
+// claudeProjectNameRe matches every character Claude Code does not keep verbatim
+// when it names a project's transcript directory: anything outside ASCII letters
+// and digits. Each matched character is replaced with a single '-' (runs are NOT
+// collapsed), mirroring claude-code's own cwd->dir encoding.
+var claudeProjectNameRe = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// claudeProjectName encodes an absolute working directory the way Claude Code
+// names its per-project transcript directory under ~/.claude/projects: every
+// character that is not an ASCII letter or digit (the path separator, but also
+// '.', '_', spaces, etc.) becomes '-', with no run collapsing. Examples:
+// /home/user/project -> -home-user-project, /home/user/proj.v2 -> -home-user-proj-v2,
+// /home/user/.config/x -> -home-user--config-x (the '/.' becomes '--').
+// Replacing only the separator (the previous behavior) derived a directory that
+// does not exist for any path containing a dot/underscore/space, silently killing
+// session history and recovery for those paths.
+func claudeProjectName(absPath string) string {
+	return claudeProjectNameRe.ReplaceAllString(absPath, "-")
+}
+
+// claudeProjectDir resolves the ~/.claude/projects/<encoded-workdir> directory
+// for workDir without checking that it exists. It honors the SessionStore
+// home-dir override so tests can pin the path independent of $HOME. The
+// claude-code project-dir convention is encoded in exactly one place
+// (claudeProjectName) and shared by findProjectDir and TranscriptPathFromHook.
+func (h *ClaudeSessionHistory) claudeProjectDir(workDir string) (string, error) {
 	homeDir, err := h.ResolveHomeDir()
 	if err != nil {
 		return "", err
 	}
-
 	absPath, err := filepath.Abs(workDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to get absolute path: %w", err)
 	}
+	return filepath.Join(homeDir, ".claude", "projects", claudeProjectName(absPath)), nil
+}
 
-	// Claude Code converts paths: /home/user/project -> -home-user-project
-	projectName := strings.ReplaceAll(absPath, string(filepath.Separator), "-")
-
-	projectDir := filepath.Join(homeDir, ".claude", "projects", projectName)
+// findProjectDir finds the existing Claude project directory for the given
+// workDir, or returns an error if it is not present.
+func (h *ClaudeSessionHistory) findProjectDir(workDir string) (string, error) {
+	projectDir, err := h.claudeProjectDir(workDir)
+	if err != nil {
+		return "", err
+	}
 	if _, err := agent.GetFS(h.FS).Stat(projectDir); err != nil {
 		return "", fmt.Errorf("project directory not found: %s", projectDir)
 	}
-
 	return projectDir, nil
 }
 
@@ -295,7 +320,11 @@ func claudeMessageEntries(message json.RawMessage, ts time.Time, proseType agent
 }
 
 // claudeBlockText flattens a tool_result block's content (a string, or an array
-// of {type:"text", text}) to a plain string.
+// of {type:"text", text} blocks) to a plain string. It is the single flattener
+// for both the transcript reader and the live stream mapper (chat_stream.go), so
+// distilled and live tool output agree. Canonical join behavior: a string is
+// returned verbatim; an array's non-empty text blocks are joined with "\n" (empty
+// text blocks are dropped); any other shape yields "".
 func claudeBlockText(content json.RawMessage) string {
 	if len(content) == 0 {
 		return ""
@@ -339,16 +368,11 @@ func (h *ClaudeSessionHistory) TranscriptPathFromHook(workDir, sessionID, transc
 	if sessionID == "" {
 		return ""
 	}
-	homeDir, err := h.ResolveHomeDir()
+	projectDir, err := h.claudeProjectDir(workDir)
 	if err != nil {
 		return ""
 	}
-	absPath, err := filepath.Abs(workDir)
-	if err != nil {
-		return ""
-	}
-	projectName := strings.ReplaceAll(absPath, string(filepath.Separator), "-")
-	return filepath.Join(homeDir, ".claude", "projects", projectName, sessionID+".jsonl")
+	return filepath.Join(projectDir, sessionID+".jsonl")
 }
 
 // "Which session is previous" now lives in ctxloom

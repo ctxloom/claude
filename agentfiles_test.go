@@ -107,8 +107,9 @@ func TestWriteAgentFiles(t *testing.T) {
 	assert.Contains(t, string(reviewer), "model: opus")
 	assert.Contains(t, string(reviewer), "Review.")
 
-	// nested roster name flattens to a dashed filename, slugged inside frontmatter.
-	deep, err := os.ReadFile(filepath.Join(agentsDir, "research-deep.md"))
+	// The filename is the same slug used as the frontmatter name (the leaf of a
+	// nested roster name, slugified), so file identity == sub-agent identity.
+	deep, err := os.ReadFile(filepath.Join(agentsDir, "deep.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(deep), "name: deep")
 
@@ -118,7 +119,22 @@ func TestWriteAgentFiles(t *testing.T) {
 	manifest, err := os.ReadFile(filepath.Join(agentsDir, ".ctxloom-agents-manifest"))
 	require.NoError(t, err)
 	assert.Contains(t, string(manifest), "reviewer.md")
-	assert.Contains(t, string(manifest), "research-deep.md")
+	assert.Contains(t, string(manifest), "deep.md")
+}
+
+// The on-disk filename must be the same slug used as the frontmatter `name`, so
+// a roster name with uppercase/spaces/punctuation does not produce a file whose
+// identity disagrees with the sub-agent it declares. claude-code-01-004.
+func TestWriteAgentFiles_FilenameMatchesSlug(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, WriteAgentFiles(tmpDir, []AgentExport{
+		{Name: "Team/Code Reviewer", Enabled: true, SystemPrompt: "x"},
+	}))
+
+	agentsDir := filepath.Join(tmpDir, ".claude", "agents")
+	body, err := os.ReadFile(filepath.Join(agentsDir, "code-reviewer.md"))
+	require.NoError(t, err, "file is named by the frontmatter slug, not the raw name")
+	assert.Contains(t, string(body), "name: code-reviewer")
 }
 
 func TestWriteAgentFilesCleanup(t *testing.T) {

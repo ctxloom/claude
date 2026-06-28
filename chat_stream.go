@@ -3,7 +3,6 @@ package claude
 import (
 	"encoding/json"
 	"sort"
-	"strings"
 
 	"github.com/ctxloom/shared/agent"
 )
@@ -35,15 +34,11 @@ type sjMessage struct {
 	Content json.RawMessage `json:"content"` // string OR array of blocks
 }
 
-type sjBlock struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text"`
-	Thinking string          `json:"thinking"` // thinking block: reasoning prose (not in Text)
-	Name     string          `json:"name"`
-	Input    json.RawMessage `json:"input"`
-	Content  json.RawMessage `json:"content"` // tool_result payload: string OR blocks
-	IsError  bool            `json:"is_error"`
-}
+// The content-block shape (text/thinking/tool_use/tool_result) is identical on
+// the wire whether it arrives in a live `--output-format stream-json` event or in
+// a persisted transcript line, so this file reuses the single claudeBlock type and
+// the single claudeBlockText flattener defined in capabilities.go rather than
+// carrying its own copy (kept in lockstep — see claude-code-01-003).
 
 type sjUsage struct {
 	InputTokens              int `json:"input_tokens"`
@@ -98,7 +93,7 @@ func mapAssistantBlocks(m *sjMessage) []agent.ChatEvent {
 	if m == nil {
 		return nil
 	}
-	var blocks []sjBlock
+	var blocks []claudeBlock
 	if err := json.Unmarshal(m.Content, &blocks); err != nil {
 		// content may be a bare string (rare for assistant).
 		var s string
@@ -146,7 +141,7 @@ func mapToolResults(m *sjMessage) []agent.ChatEvent {
 	if m == nil {
 		return nil
 	}
-	var blocks []sjBlock
+	var blocks []claudeBlock
 	if err := json.Unmarshal(m.Content, &blocks); err != nil {
 		return nil
 	}
@@ -157,34 +152,11 @@ func mapToolResults(m *sjMessage) []agent.ChatEvent {
 		}
 		out = append(out, agent.ChatEvent{Entry: &agent.SessionEntry{
 			Type:       agent.EntryTypeToolResult,
-			ToolOutput: textOfContent(b.Content),
+			ToolOutput: claudeBlockText(b.Content),
 			IsError:    b.IsError,
 		}})
 	}
 	return out
-}
-
-// textOfContent flattens a tool_result content payload (a JSON string, or an
-// array of {type:text,text} blocks) to plain text.
-func textOfContent(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
-	}
-	var blocks []sjBlock
-	if json.Unmarshal(raw, &blocks) == nil {
-		var b strings.Builder
-		for _, blk := range blocks {
-			if blk.Type == "text" {
-				b.WriteString(blk.Text)
-			}
-		}
-		return b.String()
-	}
-	return string(raw)
 }
 
 // resultToTurnMeta extracts completion accounting. Token counts come from the
@@ -215,19 +187,32 @@ func resultToTurnMeta(e *sjEvent) *agent.TurnMeta {
 // modelUsage entry with the most output tokens (ties broken on sorted id for
 // determinism), matching the provenance rule used elsewhere in this backend.
 func pickGeneratingModel(m map[string]sjModelUse) (string, sjModelUse) {
+	return pickByMaxOutput(m, func(u sjModelUse) int { return u.OutputTokens })
+}
+
+// pickByMaxOutput returns the key of m whose out(value) is greatest, breaking
+// ties on the lexicographically smallest key so the choice is deterministic; the
+// zero key ("") is returned for an empty map. This is the single provenance rule
+// both result parsers use to name the generating model: the CLI may route a large
+// read through an ancillary fast model (high input, tiny output) while the
+// requested model does the real generation, so output — not input — marks the
+// working model. parseClaudeJSONResult (JSON envelope) and pickGeneratingModel
+// (stream-json modelUsage) both build on it.
+func pickByMaxOutput[T any](m map[string]T, out func(T) int) (string, T) {
 	ids := make([]string, 0, len(m))
 	for id := range m {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	best, bestTokens := "", -1
-	var bu sjModelUse
+	var best string
+	var bestVal T
+	bestTokens := -1
 	for _, id := range ids {
-		if m[id].OutputTokens > bestTokens {
-			best, bu, bestTokens = id, m[id], m[id].OutputTokens
+		if n := out(m[id]); n > bestTokens {
+			best, bestVal, bestTokens = id, m[id], n
 		}
 	}
-	return best, bu
+	return best, bestVal
 }
 
 func initToSessionInfo(e *sjEvent) *agent.ChatSessionInfo {

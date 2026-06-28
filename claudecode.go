@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -158,19 +157,8 @@ func parseClaudeJSONResult(data []byte) (text, model string, err error) {
 	if err := json.Unmarshal(data, &env); err != nil {
 		return "", "", err
 	}
-	ids := make([]string, 0, len(env.ModelUsage))
-	for id := range env.ModelUsage {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	best := ""
-	bestTokens := -1
-	for _, id := range ids {
-		if env.ModelUsage[id].OutputTokens > bestTokens {
-			best, bestTokens = id, env.ModelUsage[id].OutputTokens
-		}
-	}
-	return env.Result, best, nil
+	model, _ = pickByMaxOutput(env.ModelUsage, func(u claudeModelUsage) int { return u.OutputTokens })
+	return env.Result, model, nil
 }
 
 // buildArgs constructs the command-line arguments.
