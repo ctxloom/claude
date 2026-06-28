@@ -1,2 +1,7 @@
 /.cache/
 *.test
+
+# ctxloom private working state (synced bundles, session/context, project id)
+*.ctxloom.bak
+.agents/
+.codex/config.toml
