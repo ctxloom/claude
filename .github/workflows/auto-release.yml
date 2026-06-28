@@ -1,0 +1,57 @@
+name: Auto Release
+
+# On a successful CI run for a push to main (i.e. a merged PR), tag the version
+# in the VERSION file. For a library the tag IS the release: consumers resolve
+# github.com/ctxloom/claude@<tag> through the Go module proxy — there is no
+# binary to build, so there is no release-completer step.
+#
+# This does NOT bump the version — the version is set deliberately in the PR via
+# `versionator set`, and ci.yml's version-guard ensures it is fresh. Tags are
+# immutable; if the tag already exists this job FAILS rather than re-pointing it.
+#
+# The tag is pushed with RELEASE_TAG_TOKEN (a PAT with contents:write), NOT the
+# default GITHUB_TOKEN.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    name: Tag VERSION
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TAG_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Tag VERSION (immutable; fail if it already exists)
+        run: |
+          V="$(tr -d '[:space:]' < VERSION)"
+          if [ -z "$V" ]; then echo "::error::VERSION file is empty"; exit 1; fi
+          TAG="v${V#v}"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag $TAG already exists. VERSION must be bumped per release; refusing to re-point an immutable tag."
+            exit 1
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Tagged $TAG — consumers can now pin github.com/ctxloom/claude@$TAG."

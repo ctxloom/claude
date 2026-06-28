@@ -1,0 +1,63 @@
+# Gremlins mutation testing configuration (standardized across the ctxloom family).
+# https://gremlins.dev/0.5/usage/configuration/
+
+silent: false
+
+# Files to exclude from mutation testing
+exclude-files:
+  - ".*_test\\.go$"
+  - ".*\\.pb\\.go$"
+  - ".*/mock_.*\\.go$"
+  - ".*/testdata/.*"
+  - "tests/integration/.*"
+  - ".*/tests/integration/.*"
+
+unleash:
+  # Don't run integration tests (use unit tests only for speed)
+  integration: false
+  # Set to true to see what would be mutated without running tests
+  dry-run: false
+  # Build tags to use
+  tags: ""
+  # Output format (empty = terminal, or "json")
+  output: ""
+  # Number of workers (0 = number of CPUs)
+  workers: 0
+  # CPUs per test process (0 = no limit)
+  test-cpu: 0
+  # Timeout multiplier for test runs (0 = default)
+  # Higher values reduce false timeouts but increase run time
+  timeout-coefficient: 5
+
+  # Quality gates - fail if scores drop below these thresholds
+  threshold:
+    # Percentage of mutants killed by tests (0 = disabled)
+    # Start conservative, increase as coverage improves
+    efficacy: 60
+    # Percentage of mutants covered by tests (0 = disabled)
+    mutant-coverage: 45
+
+# Mutation operators to enable
+mutants:
+  arithmetic-base:
+    enabled: true
+  conditionals-boundary:
+    enabled: true
+  conditionals-negation:
+    enabled: true
+  increment-decrement:
+    enabled: true
+  invert-assignments:
+    enabled: true
+  invert-bitwise:
+    enabled: false
+  invert-bwassign:
+    enabled: false
+  invert-negatives:
+    enabled: true
+  invert-logical:
+    enabled: true
+  invert-loopctrl:
+    enabled: true
+  remove-self-assignments:
+    enabled: true

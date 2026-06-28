@@ -1,0 +1,28 @@
+# golangci-lint v2 configuration (standardized across the ctxloom family).
+#
+# v2 removed the default exclusion presets that v1 enabled out of the box. This
+# codebase follows the std conventions those defaults encoded — in particular it
+# intentionally does not check errors from fmt.Fprint*/Print* to CLI output and
+# from Close(). Restore the standard exclusions so errcheck stops flagging those
+# as failures.
+version: "2"
+
+linters:
+  enable:
+    - forbidigo
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: 'os\.Setenv'
+          msg: 'use t.Setenv (auto-restores between tests)'
+        - pattern: 'os\.Chdir'
+          msg: 'use t.Chdir (auto-restores between tests)'
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # forbidigo guards test hygiene only; production code never needs these
+      # calls either, but legitimate process code may read its own env.
+      - path-except: '_test\.go'
+        linters:
+          - forbidigo

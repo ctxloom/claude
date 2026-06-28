@@ -1,0 +1,32 @@
+# Container justfile for claude — runs INSIDE the devcontainer, where the pinned
+# tools live (golangci-lint v2, gremlins). Overlaid as the in-container justfile
+# by `just _run`, and invoked directly in CI via `just -f justfile.container <t>`.
+#
+# Module mode: deps resolve from go.mod pins (cache/proxy), never a host go.work.
+export GOWORK := "off"
+
+# Default recipe.
+default: check
+
+# Run the package tests under -race with coverage (consumed by codecov in CI).
+test *ARGS:
+    go test -race -coverprofile=coverage.out {{ARGS}} ./...
+
+# Vet all packages.
+vet:
+    go vet ./...
+
+# Report any unformatted files.
+fmt-check:
+    @test -z "$(gofmt -l .)" || { echo "unformatted:"; gofmt -l .; exit 1; }
+
+# golangci-lint (v2; config in .golangci.yml).
+lint:
+    golangci-lint run
+
+# Mutation testing (gremlins; config in .gremlins.yaml).
+test-mutation *ARGS:
+    gremlins unleash {{ARGS}}
+
+# Full gate: format check, vet, lint, tests.
+check: fmt-check vet lint test
