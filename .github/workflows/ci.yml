@@ -87,7 +87,7 @@ jobs:
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
-          file: ./coverage.out
+          files: ./coverage.out
           fail_ci_if_error: false
         continue-on-error: true
 
@@ -102,6 +102,8 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Run golangci-lint
         run: just -f justfile.container lint
 
