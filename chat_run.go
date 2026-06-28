@@ -172,6 +172,9 @@ func (b *ClaudeCode) chatArgs(req agent.ChatRequest) []string {
 	if req.AutoApprove {
 		args = append(args, "--dangerously-skip-permissions")
 	}
+	// Name the structured-chat session after ctxloom's harp, matching the
+	// interactive path, so it's findable in the /resume picker.
+	args = append(args, sessionNameArgs(req.Env)...)
 	return args
 }
 

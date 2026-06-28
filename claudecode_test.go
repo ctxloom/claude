@@ -266,6 +266,49 @@ func TestClaudeCode_BuildArgs_InteractiveMode(t *testing.T) {
 	assert.NotContains(t, args, "--print")
 }
 
+// TestClaudeCode_BuildArgs_InteractiveNamesSession verifies that an interactive
+// session is named after ctxloom's harp via --name so claude's prompt box,
+// /resume picker, and terminal title match the session identity.
+func TestClaudeCode_BuildArgs_InteractiveNamesSession(t *testing.T) {
+	backend := NewClaudeCode(writeClaudeSettings)
+
+	req := &agent.ExecuteRequest{
+		Mode: agent.ModeInteractive,
+		Env:  map[string]string{sessionHarpEnv: "fair-pushy-cable"},
+	}
+	args := backend.buildArgs(req)
+
+	assert.True(t, argPair(args, "--name", "fair-pushy-cable"),
+		"interactive session should be named after the harp")
+}
+
+// TestClaudeCode_BuildArgs_NoHarpNoName verifies that with no harp in env the
+// session is left unnamed rather than passing an empty --name.
+func TestClaudeCode_BuildArgs_NoHarpNoName(t *testing.T) {
+	backend := NewClaudeCode(writeClaudeSettings)
+
+	args := backend.buildArgs(&agent.ExecuteRequest{Mode: agent.ModeInteractive})
+
+	assert.NotContains(t, args, "--name",
+		"absent harp must not produce a --name flag")
+}
+
+// TestClaudeCode_BuildArgs_MinimalModeNoName verifies that throwaway minimal
+// oneshot runs are not named even when a harp is present in env.
+func TestClaudeCode_BuildArgs_MinimalModeNoName(t *testing.T) {
+	backend := NewClaudeCode(writeClaudeSettings)
+
+	req := &agent.ExecuteRequest{
+		Mode:      agent.ModeOneshot,
+		SkipSetup: true,
+		Env:       map[string]string{sessionHarpEnv: "fair-pushy-cable"},
+	}
+	args := backend.buildArgs(req)
+
+	assert.NotContains(t, args, "--name",
+		"throwaway oneshot runs must not be named")
+}
+
 // TestClaudeCode_BuildArgs_Prompt verifies that prompt content is appended
 // as the final argument.
 func TestClaudeCode_BuildArgs_Prompt(t *testing.T) {

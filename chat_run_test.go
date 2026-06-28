@@ -31,6 +31,23 @@ func TestChatArgs_StreamJSONFlags(t *testing.T) {
 	assert.Contains(t, joined, "--dangerously-skip-permissions")
 }
 
+// TestChatArgs_NamesSessionFromHarp verifies the structured-chat session is named
+// after ctxloom's harp via --name, matching the interactive path, so it's findable
+// in the /resume picker.
+func TestChatArgs_NamesSessionFromHarp(t *testing.T) {
+	b := &ClaudeCode{}
+	args := b.chatArgs(agent.ChatRequest{Env: map[string]string{sessionHarpEnv: "fair-pushy-cable"}})
+	assert.True(t, argPair(args, "--name", "fair-pushy-cable"))
+}
+
+// TestChatArgs_NoHarpNoName verifies that without a harp in env no --name flag is
+// added.
+func TestChatArgs_NoHarpNoName(t *testing.T) {
+	b := &ClaudeCode{}
+	args := b.chatArgs(agent.ChatRequest{})
+	assert.NotContains(t, args, "--name")
+}
+
 // TestChat_PumpsMessagesAndStreamsEvents: a user message is written to the
 // transport's stdin as one NDJSON line, and the transport's stdout NDJSON is
 // mapped to ChatEvents on `out`; `out` is closed on return.

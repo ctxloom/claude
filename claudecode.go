@@ -173,6 +173,24 @@ func parseClaudeJSONResult(data []byte) (text, model string, err error) {
 	return env.Result, best, nil
 }
 
+// sessionHarpEnv is the env var carrying ctxloom's per-session harp name (e.g.
+// "fair-pushy-cable"). The host sets it on the run env; the backend reads it to
+// name the launched claude session. Duplicated here rather than shared so the
+// backend module stays decoupled from the host's session machinery.
+const sessionHarpEnv = "CTXLOOM_SESSION_HARP"
+
+// sessionNameArgs returns the `--name <harp>` flag pair that labels the launched
+// claude session with ctxloom's harp name, or nil when no harp is set. claude's
+// /rename slash command is interactive-only and cannot be injected over
+// stream-json or as an initial prompt, so --name is the only launch-time way to
+// set the session's display name (prompt box, /resume picker, terminal title).
+func sessionNameArgs(env map[string]string) []string {
+	if harp := env[sessionHarpEnv]; harp != "" {
+		return []string{"--name", harp}
+	}
+	return nil
+}
+
 // buildArgs constructs the command-line arguments.
 func (b *ClaudeCode) buildArgs(req *agent.ExecuteRequest) []string {
 	args := make([]string, len(b.Args))
@@ -187,6 +205,14 @@ func (b *ClaudeCode) buildArgs(req *agent.ExecuteRequest) []string {
 	// substitutes a fast-model default. An empty model lets the CLI pick.
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
+	}
+
+	// Name the interactive session after ctxloom's harp so claude's prompt box,
+	// /resume picker, and terminal title match the session identity. Oneshot and
+	// minimal runs are throwaway (often --no-session-persistence), so they stay
+	// unnamed.
+	if req.Mode == agent.ModeInteractive {
+		args = append(args, sessionNameArgs(req.Env)...)
 	}
 
 	if req.Mode == agent.ModeOneshot {
