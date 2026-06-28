@@ -78,6 +78,11 @@ type SessionStartPayload struct {
 // inject context. An empty output (no hookSpecificOutput) injects nothing.
 type SessionStartOutput struct {
 	HookSpecificOutput *SessionStartSpecificOutput `json:"hookSpecificOutput,omitempty"`
+	// SystemMessage rides a separate channel from HookSpecificOutput: Claude
+	// Code surfaces it to the user in the terminal, NOT to the model. ctxloom
+	// uses it to nudge the user toward /recover after a /clear, where the model
+	// gets no recovered context but the human should know it can be pulled back.
+	SystemMessage string `json:"systemMessage,omitempty"`
 }
 
 // SessionStartSpecificOutput carries the additional context to inject.
